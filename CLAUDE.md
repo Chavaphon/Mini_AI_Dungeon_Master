@@ -11,7 +11,7 @@ Mini AI Dungeon Master: a text chatbot that runs one boss fight (Lyra vs. Ashfan
 - **Ask, don't assume.** If the spec is unclear, contradictory or silent, stop and ask the user. Do not fill gaps with guesses.
 - **Spec edits need approval.** Propose changes to ProjectRequirements.md; edit it only after the user approves.
 - **Test-first for the engine.** Write a failing pytest before implementing each engine rule.
-- **No git commits or pushes** unless the user asks.
+- **Commit, push and PR:** Once the whole task is done without remaining question, ask the user if he wants to commit, push, and create PR.
 
 ## Architecture invariants
 
