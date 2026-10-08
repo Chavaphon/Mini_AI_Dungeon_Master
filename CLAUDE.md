@@ -12,6 +12,7 @@ Mini AI Dungeon Master: a text chatbot that runs one boss fight (Lyra vs. Ashfan
 - **Spec edits need approval.** Propose changes to ProjectRequirements.md; edit it only after the user approves.
 - **Test-first for the engine.** Write a failing pytest before implementing each engine rule.
 - **Commit, push and PR:** Once the whole task is done without remaining question, ask the user if he wants to commit, push, and create PR.
+- **GitHub via `gh` CLI.** Use the `gh` CLI for issues, PRs and other GitHub operations, not the GitHub MCP server.
 
 ## Architecture invariants
 
