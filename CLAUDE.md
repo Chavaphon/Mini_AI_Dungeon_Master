@@ -33,6 +33,7 @@ Turn loop (§10): input guardrails → intent call (temp 0, `format: "json"`) �
 ```
 mini_dm/
   __init__.py
+  config.py        # loads config.json
   engine.py        # state, dice, rules, boss policy
   llm.py           # Ollama client, intent and narration calls
   guardrails.py    # input, output and integrity checks
