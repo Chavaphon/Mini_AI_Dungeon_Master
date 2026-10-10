@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from mini_dm.config import load_config
@@ -12,6 +13,8 @@ def test_config_has_required_values():
     assert config["ollama"]["model"]
     assert config["ollama"]["host"].startswith("http://localhost")
     assert config["ollama"]["timeout_s"] == 20
+    assert config["ollama"]["warmup_timeout_s"] > config["ollama"]["timeout_s"]
+    assert config["ollama"]["keep_alive"]
     assert config["intent"] == {"temperature": 0, "num_predict": 64}
     assert config["narration"] == {
         "temperature": 0.7,
@@ -35,7 +38,8 @@ def test_config_character_stats_match_section_5():
 
 def test_model_name_only_in_config():
     model = load_config()["ollama"]["model"]
-    for path in PACKAGE_DIR.rglob("*.py"):
+    for path in [*PACKAGE_DIR.rglob("*.py"), *PACKAGE_DIR.rglob("*.txt")]:
         source = path.read_text(encoding="utf-8")
         assert model not in source, path.name
-        assert "llama" not in source.lower(), path.name
+        # "Ollama" is the server name and is fine; a bare "llama" is a model name.
+        assert not re.search(r"(?<!o)llama", source, re.IGNORECASE), path.name

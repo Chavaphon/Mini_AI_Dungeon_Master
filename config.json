@@ -3,7 +3,9 @@
   "ollama": {
     "host": "http://localhost:11434",
     "model": "llama3.1:8b",
-    "timeout_s": 20
+    "timeout_s": 20,
+    "warmup_timeout_s": 120,
+    "keep_alive": "30m"
   },
   "intent": {
     "temperature": 0,
