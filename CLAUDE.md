@@ -20,7 +20,7 @@ Mini AI Dungeon Master: a text chatbot that runs one boss fight (Lyra vs. Ashfan
 - **The engine has no LLM dependency** and must stay importable and testable without Ollama.
 - **All dice come from one seeded `random.Random` instance.** Same seed + same inputs = same dice and state (FR-12). Never call the `random` module directly.
 - **Boss policy is code only**: Fire Breath once, on the first boss turn after its HP ≤ 50%; otherwise Bite.
-- **Narration gets facts only** (actor, action, hit/miss, damage, HP before/after, HP band). Every number in the narration must appear in the facts (GR-3).
+- **Narration gets facts only** (actor, action, hit/miss, critical, damage, HP before/after, max HP, HP band). Every number in the narration must appear in the facts (GR-3).
 - **Retry budget:** at most 2 LLM calls per phase, with a timeout on every Ollama call (GR-9).
 - **The model name lives only in `config.json`.** No hardcoded model names, temperatures, seed or limits in code.
 - **Localhost only.** No paid APIs and no network traffic beyond the local Ollama server.
