@@ -13,7 +13,7 @@ _DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 # PC actions resolved as attack rolls against Ashfang (config key = action name).
 PC_ATTACKS = ("attack", "fire_bolt")
 # Every PC action the engine can resolve in this build.
-PC_ACTIONS = PC_ATTACKS + ("cure_wounds",)
+PC_ACTIONS = PC_ATTACKS + ("cure_wounds", "dodge")
 
 
 @dataclass(frozen=True)
@@ -115,6 +115,7 @@ class ActionResult:
     target: str
     hit: bool
     critical: bool
+    disadvantage: bool
     damage: int
     target_hp_before: int
     target_hp_after: int
@@ -122,7 +123,8 @@ class ActionResult:
     target_hp_band: str
     bonus: int
     target_ac: int
-    attack_roll: Roll
+    natural: int  # the d20 face used: the lower of the two under disadvantage
+    attack_roll: Roll  # 1d20, or 2d20 under disadvantage (its total is not used)
     damage_roll: Roll | None
 
     def narration_facts(self) -> dict:
@@ -133,6 +135,7 @@ class ActionResult:
             "target": self.target,
             "hit": self.hit,
             "critical": self.critical,
+            "disadvantage": self.disadvantage,
             "damage": self.damage,
             "target_hp_before": self.target_hp_before,
             "target_hp_after": self.target_hp_after,
@@ -142,11 +145,20 @@ class ActionResult:
 
 
 def resolve_attack(
-    dice: Dice, attacker: Combatant, target: Combatant, action: str, bonus: int, damage: str
+    dice: Dice,
+    attacker: Combatant,
+    target: Combatant,
+    action: str,
+    bonus: int,
+    damage: str,
+    disadvantage: bool = False,
 ) -> ActionResult:
-    """d20 + bonus >= AC hits. A natural 20 always hits and crits; a natural 1 always misses."""
-    attack_roll = dice.roll("1d20")
-    natural = attack_roll.rolls[0]
+    """d20 + bonus >= AC hits. A natural 20 always hits and crits; a natural 1 always misses.
+
+    With disadvantage, roll 2d20 and use the lower; the natural 20/1 rules read that die.
+    """
+    attack_roll = dice.roll("2d20" if disadvantage else "1d20")
+    natural = min(attack_roll.rolls)
     critical = natural == 20
     hit = critical or (natural != 1 and natural + bonus >= target.ac)
 
@@ -161,6 +173,7 @@ def resolve_attack(
         target=target.name,
         hit=hit,
         critical=critical,
+        disadvantage=disadvantage,
         damage=damage_roll.total if damage_roll else 0,
         target_hp_before=hp_before,
         target_hp_after=target.hp,
@@ -168,6 +181,7 @@ def resolve_attack(
         target_hp_band=hp_band(target.hp, target.max_hp),
         bonus=bonus,
         target_ac=target.ac,
+        natural=natural,
         attack_roll=attack_roll,
         damage_roll=damage_roll,
     )
@@ -228,14 +242,34 @@ def resolve_cure_wounds(dice: Dice, state: FightState, heal: str) -> HealResult:
     )
 
 
+@dataclass(frozen=True)
+class DodgeResult:
+    actor: str
+    action: str
+    target: str
+
+    def narration_facts(self) -> dict:
+        """The FR-7 facts for a dodge: who acted, the action and the target."""
+        return {"actor": self.actor, "action": self.action, "target": self.target}
+
+
+def resolve_dodge(state: FightState) -> DodgeResult:
+    """The PC dodges: attacks against her have disadvantage until her next turn starts."""
+    state.pc_dodging = True
+    return DodgeResult(actor=state.pc.name, action="dodge", target=state.pc.name)
+
+
 def choose_boss_action(state: FightState) -> str:
     """Boss policy, code only. Fire Breath arrives in a later slice; for now, Bite."""
     return "bite"
 
 
-def _resolve_pc_action(
-    state: FightState, dice: Dice, characters: dict, action: str
-) -> ActionResult | HealResult:
+TurnResult = ActionResult | HealResult | DodgeResult
+
+
+def _resolve_pc_action(state: FightState, dice: Dice, characters: dict, action: str) -> TurnResult:
+    if action == "dodge":
+        return resolve_dodge(state)
     if action == "cure_wounds":
         return resolve_cure_wounds(dice, state, characters["pc"]["cure_wounds"]["heal"])
     if action in PC_ATTACKS:
@@ -247,10 +281,9 @@ def _resolve_pc_action(
     raise ValueError(f"Action not supported yet: {action!r}")
 
 
-def play_turn(
-    state: FightState, dice: Dice, characters: dict, action: str
-) -> list[ActionResult | HealResult]:
+def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> list[TurnResult]:
     """PC acts, then the boss acts unless the fight has ended. The round advances after the boss."""
+    state.pc_dodging = False  # a dodge ends at the start of the dodger's next turn
     results = [_resolve_pc_action(state, dice, characters, action)]
     if state.boss.hp == 0:
         state.outcome = "victory"
@@ -259,7 +292,15 @@ def play_turn(
     boss_action = choose_boss_action(state)
     bite = characters["boss"][boss_action]
     results.append(
-        resolve_attack(dice, state.boss, state.pc, boss_action, bite["bonus"], bite["damage"])
+        resolve_attack(
+            dice,
+            state.boss,
+            state.pc,
+            boss_action,
+            bite["bonus"],
+            bite["damage"],
+            disadvantage=state.pc_dodging,
+        )
     )
     if state.pc.hp == 0:
         state.outcome = "defeat"

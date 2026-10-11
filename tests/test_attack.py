@@ -19,6 +19,7 @@ FACT_KEYS = {
     "target",
     "hit",
     "critical",
+    "disadvantage",
     "damage",
     "target_hp_before",
     "target_hp_after",
@@ -152,6 +153,7 @@ def test_narration_facts_are_fr7_fields_only():
         "target": "Ashfang",
         "hit": True,
         "critical": True,
+        "disadvantage": False,
         "damage": 15,
         "target_hp_before": 30,
         "target_hp_after": 15,
@@ -211,7 +213,7 @@ def test_pc_at_zero_hp_is_defeat():
 
 def test_play_turn_rejects_unbuilt_actions():
     with pytest.raises(ValueError):
-        play_turn(_state(), ScriptedDice([]), _characters(), "dodge")
+        play_turn(_state(), ScriptedDice([]), _characters(), "none")
 
 
 def test_same_seed_and_actions_give_same_state():

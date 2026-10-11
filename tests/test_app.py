@@ -68,6 +68,7 @@ FACT_KEYS = {
     "target",
     "hit",
     "critical",
+    "disadvantage",
     "damage",
     "target_hp_before",
     "target_hp_after",
@@ -121,7 +122,7 @@ def test_narration_gets_both_actions_as_facts_only():
 
 @pytest.mark.parametrize(
     "intent_reply",
-    ['{"action": "dodge", "target": "self"}', '{"action": "none", "target": ""}', "not json"],
+    ['{"action": "none", "target": ""}', "not json"],
 )
 def test_other_intents_get_stub_and_turn_does_not_advance(intent_reply):
     config, session = _session([])
@@ -214,8 +215,8 @@ def test_play_appends_rolls_after_narration_and_keeps_them_from_the_model():
 
 def test_stub_reply_has_no_rolls():
     config, session = _session([])
-    llm = FakeLLM(['{"action": "dodge", "target": "self"}'])
-    reply = play("I dive aside", session, llm, config)
+    llm = FakeLLM(['{"action": "none", "target": ""}'])
+    reply = play("I look around", session, llm, config)
     assert "🎲" not in reply
 
 
@@ -327,4 +328,66 @@ def test_status_counts_cure_wounds_down_to_zero():
     assert "Round: 4" in status
     assert history[-1]["content"].endswith(
         "🎲 Lyra, Cure Wounds: no uses left\n🎲 Ashfang, bite: d20 2 + 5 = 7 vs AC 14 → miss"
+    )
+
+
+# --- Dodge --------------------------------------------------------------------
+
+DODGE = '{"action": "dodge", "target": "self"}'
+
+
+def test_dodge_turn_end_to_end():
+    # Lyra dodges. Ashfang rolls 2d20 15, 8 and uses 8: 8 + 5 = 13 misses.
+    config, session = _session([15, 8])
+    llm = FakeLLM([DODGE, "You twist aside as the jaws snap shut on air."])
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+
+    _, history, status = submit_turn("I dive aside", history, session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    dodge, bite = facts["actions"]
+    assert dodge == {"actor": "Lyra", "action": "dodge", "target": "Lyra"}
+    assert (bite["action"], bite["disadvantage"]) == ("bite", True)
+    narration, rolls = history[-1]["content"].split("\n\n")
+    assert narration == "You twist aside as the jaws snap shut on air."
+    assert rolls.splitlines() == [
+        "🎲 Lyra, dodge: no roll, attacks against Lyra have disadvantage",
+        "🎲 Ashfang, bite: 2d20 15, 8 (disadvantage) → 8 + 5 = 13 vs AC 14 → miss",
+    ]
+    assert "Dodging: Yes" in status
+    assert "Round: 2" in status
+
+
+def test_status_shows_dodge_ending_on_next_turn():
+    config, session = _session([15, 8, 2, 2])  # dodge turn, then both miss
+    llm = FakeLLM([DODGE, "Dodge.", ATTACK, "Swing."])
+
+    _, history, status = submit_turn("I dive aside", [], session, llm, config)
+    assert "Dodging: Yes" in status
+    _, history, status = submit_turn("I attack", history, session, llm, config)
+    assert "Dodging: No" in status
+    assert history[-1]["content"].endswith("🎲 Ashfang, bite: d20 2 + 5 = 7 vs AC 14 → miss")
+
+
+def _dodge_turn(faces):
+    config, session = _session(faces)
+    return play_turn(session["state"], session["dice"], config["characters"], "dodge")
+
+
+def test_roll_line_for_disadvantage_natural_1():
+    lines = format_rolls(_dodge_turn([1, 12])).splitlines()
+    assert lines[1] == "🎲 Ashfang, bite: 2d20 1, 12 (disadvantage) → natural 1 vs AC 14 → miss"
+
+
+def test_roll_line_for_disadvantage_dropped_20():
+    lines = format_rolls(_dodge_turn([20, 3])).splitlines()
+    assert lines[1] == "🎲 Ashfang, bite: 2d20 20, 3 (disadvantage) → 3 + 5 = 8 vs AC 14 → miss"
+
+
+def test_roll_line_for_disadvantage_natural_20():
+    lines = format_rolls(_dodge_turn([20, 20, 3, 4])).splitlines()
+    assert lines[1] == (
+        "🎲 Ashfang, bite: 2d20 20, 20 (disadvantage) → natural 20 vs AC 14 → "
+        "critical hit, 2d8+2: 3 + 4 + 2 = 9 damage"
     )
