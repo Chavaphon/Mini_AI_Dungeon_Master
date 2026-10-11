@@ -188,3 +188,18 @@ def test_narration_prompt_sets_style():
     assert "2-4 sentences" in prompt
     assert "second person" in prompt
     assert "present tense" in prompt
+
+
+def test_intent_maps_fire_bolt_text():
+    llm = FakeLLM(['{"action": "fire_bolt", "target": "ashfang"}'])
+
+    _raw, intent = request_intent(llm, load_config(), "I hurl a Fire Bolt at Ashfang")
+
+    assert llm.calls[0]["messages"][-1]["content"] == "I hurl a Fire Bolt at Ashfang"
+    assert intent == {"action": "fire_bolt", "target": "ashfang"}
+
+
+def test_narration_prompt_names_each_action():
+    prompt = load_prompt("narration")
+    for name in ('"attack"', '"fire_bolt"', "Fire Bolt", '"bite"'):
+        assert name in prompt

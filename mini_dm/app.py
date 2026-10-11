@@ -10,6 +10,7 @@ from mini_dm.engine import (
     Combatant,
     Dice,
     FightState,
+    PC_ATTACKS,
     Roll,
     hp_band,
     initial_state,
@@ -24,13 +25,14 @@ OPENING_SCENE = (
     "and fixes its gaze on you, Lyra. What do you do?"
 )
 
-# Placeholder until the other actions land: only the sword works in this build.
+# Placeholder until the other actions land: only the sword and Fire Bolt work in this build.
 NOT_YET_TEXT = (
-    "Your hand tightens on the hilt of your short sword. For now, steel is your "
-    "only answer. Strike at Ashfang!"
+    "Your hand tightens on the hilt of your short sword as embers gather at your "
+    "fingertips. For now, steel and flame are your only answers. Strike at Ashfang "
+    "or hurl a Fire Bolt!"
 )
 
-_ACTION_LABELS = {"attack": "sword", "bite": "bite"}
+_ACTION_LABELS = {"attack": "sword", "fire_bolt": "Fire Bolt", "bite": "bite"}
 
 _BAND_COLOURS = {
     "healthy": "#3a9d5d",
@@ -98,10 +100,10 @@ def new_session(config: dict) -> dict:
 def play(text: str, session: dict, client, config: dict) -> str:
     """One turn: intent call -> engine (PC then boss) -> one narration call."""
     _raw, intent = request_intent(client, config, text)
-    if intent is None or intent["action"] != "attack":
+    if intent is None or intent["action"] not in PC_ATTACKS:
         return NOT_YET_TEXT
 
-    results = play_turn(session["state"], session["dice"], config["characters"], "attack")
+    results = play_turn(session["state"], session["dice"], config["characters"], intent["action"])
     facts = {"actions": [result.narration_facts() for result in results]}
     return f"{request_narration(client, config, facts)}\n\n{format_rolls(results)}"
 

@@ -61,6 +61,7 @@ def test_build_ui_opens_with_opening_scene_and_status_panel():
 # --- turn wiring (fake LLM, scripted dice) ------------------------------------
 
 ATTACK = '{"action": "attack", "target": "ashfang"}'
+FIRE_BOLT = '{"action": "fire_bolt", "target": "ashfang"}'
 FACT_KEYS = {
     "actor",
     "action",
@@ -120,13 +121,13 @@ def test_narration_gets_both_actions_as_facts_only():
 
 @pytest.mark.parametrize(
     "intent_reply",
-    ['{"action": "fire_bolt", "target": "ashfang"}', '{"action": "none", "target": ""}', "not json"],
+    ['{"action": "cure_wounds", "target": "self"}', '{"action": "none", "target": ""}', "not json"],
 )
 def test_other_intents_get_stub_and_turn_does_not_advance(intent_reply):
     config, session = _session([])
     llm = FakeLLM([intent_reply])
 
-    reply = play("I cast Fire Bolt", session, llm, config)
+    reply = play("I heal myself", session, llm, config)
 
     assert reply == NOT_YET_TEXT
     assert len(llm.calls) == 1
@@ -213,5 +214,39 @@ def test_play_appends_rolls_after_narration_and_keeps_them_from_the_model():
 
 def test_stub_reply_has_no_rolls():
     config, session = _session([])
-    reply = play("I cast Fire Bolt", session, FakeLLM(['{"action": "fire_bolt", "target": "ashfang"}']), config)
+    llm = FakeLLM(['{"action": "cure_wounds", "target": "self"}'])
+    reply = play("I heal myself", session, llm, config)
     assert "🎲" not in reply
+
+
+# --- Fire Bolt ----------------------------------------------------------------
+
+
+def test_fire_bolt_turn_end_to_end():
+    # Lyra: d20 9 + 5 = 14 hits, d10 7. Ashfang misses on 2.
+    config, session = _session([9, 7, 2])
+    llm = FakeLLM([FIRE_BOLT, "Flame lances into Ashfang."])
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+
+    _, history, status = submit_turn("I hurl a Fire Bolt at Ashfang", history, session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    assert [a["action"] for a in facts["actions"]] == ["fire_bolt", "bite"]
+    narration, rolls = history[-1]["content"].split("\n\n")
+    assert narration == "Flame lances into Ashfang."
+    assert rolls.splitlines()[0] == (
+        "🎲 Lyra, Fire Bolt: d20 9 + 5 = 14 vs AC 14 → hit, 1d10: 7 damage"
+    )
+    assert session["state"].boss.hp == 23
+    assert "23/30" in status and "Round: 2" in status
+
+
+def test_roll_line_for_fire_bolt_critical():
+    config, session = _session([20, 4, 9, 2])
+    results = play_turn(session["state"], session["dice"], config["characters"], "fire_bolt")
+
+    assert format_rolls(results).splitlines()[0] == (
+        "🎲 Lyra, Fire Bolt: d20 20 (natural 20) vs AC 14 → "
+        "critical hit, 2d10: 4 + 9 = 13 damage"
+    )
