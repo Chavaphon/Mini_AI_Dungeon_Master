@@ -165,8 +165,9 @@ def test_narration_facts_are_fr7_fields_only():
 # --- turn order and boss policy ----------------------------------------------
 
 
-def test_boss_bites_in_this_slice():
-    assert choose_boss_action(_state()) == "bite"
+def test_boss_at_full_hp_bites():
+    trigger_hp_pct = _characters()["boss"]["fire_breath"]["trigger_hp_pct"]
+    assert choose_boss_action(_state(), trigger_hp_pct) == "bite"
 
 
 def test_turn_pc_attacks_then_boss_bites():

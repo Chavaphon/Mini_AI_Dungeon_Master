@@ -259,8 +259,10 @@ def resolve_dodge(state: FightState) -> DodgeResult:
     return DodgeResult(actor=state.pc.name, action="dodge", target=state.pc.name)
 
 
-def choose_boss_action(state: FightState) -> str:
-    """Boss policy, code only. Fire Breath arrives in a later slice; for now, Bite."""
+def choose_boss_action(state: FightState, trigger_hp_pct: int) -> str:
+    """Boss policy, code only: Fire Breath once, when HP is at or below the trigger; else Bite."""
+    if not state.fire_breath_used and state.boss.hp * 100 <= state.boss.max_hp * trigger_hp_pct:
+        return "fire_breath"
     return "bite"
 
 
@@ -289,16 +291,19 @@ def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> l
         state.outcome = "victory"
         return results
 
-    boss_action = choose_boss_action(state)
-    bite = characters["boss"][boss_action]
+    boss = characters["boss"]
+    boss_action = choose_boss_action(state, boss["fire_breath"]["trigger_hp_pct"])
+    if boss_action == "fire_breath":
+        state.fire_breath_used = True  # spent once chosen, hit or miss
+    boss_attack = boss[boss_action]
     results.append(
         resolve_attack(
             dice,
             state.boss,
             state.pc,
             boss_action,
-            bite["bonus"],
-            bite["damage"],
+            boss_attack["bonus"],
+            boss_attack["damage"],
             disadvantage=state.pc_dodging,
         )
     )

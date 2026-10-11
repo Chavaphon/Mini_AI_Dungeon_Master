@@ -391,3 +391,39 @@ def test_roll_line_for_disadvantage_natural_20():
         "🎲 Ashfang, bite: 2d20 20, 20 (disadvantage) → natural 20 vs AC 14 → "
         "critical hit, 2d8+2: 3 + 4 + 2 = 9 damage"
     )
+
+
+# --- Fire Breath --------------------------------------------------------------
+
+
+def test_fire_breath_turn_end_to_end():
+    # Lyra: d20 15 hits, d6 2 -> 5, Ashfang 20 -> 15. Fire Breath: d20 15 hits, 2d6 3 + 4 = 7.
+    config, session = _session([15, 2, 15, 3, 4])
+    session["state"].boss.hp = 20
+    llm = FakeLLM([ATTACK, "Ashfang roars and breathes fire."])
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+
+    _, history, status = submit_turn("I slash at Ashfang", history, session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    attack, breath = facts["actions"]
+    assert set(breath) == FACT_KEYS
+    assert (breath["actor"], breath["action"], breath["damage"]) == ("Ashfang", "fire_breath", 7)
+    narration, rolls = history[-1]["content"].split("\n\n")
+    assert narration == "Ashfang roars and breathes fire."
+    assert rolls.splitlines()[1] == (
+        "🎲 Ashfang, Fire Breath: d20 15 + 5 = 20 vs AC 14 → hit, 2d6: 3 + 4 = 7 damage"
+    )
+    assert "23/30" in status and "15/30" in status
+
+
+def test_roll_line_for_fire_breath_critical():
+    config, session = _session([2, 20, 1, 2, 3, 4])
+    session["state"].boss.hp = 15
+    results = play_turn(session["state"], session["dice"], config["characters"], "attack")
+
+    assert format_rolls(results).splitlines()[1] == (
+        "🎲 Ashfang, Fire Breath: d20 20 (natural 20) vs AC 14 → "
+        "critical hit, 4d6: 1 + 2 + 3 + 4 = 10 damage"
+    )
