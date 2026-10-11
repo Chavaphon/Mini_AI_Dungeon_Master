@@ -10,6 +10,9 @@ from dataclasses import dataclass
 
 _DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 
+# PC actions resolved as attack rolls against Ashfang (config key = action name).
+PC_ATTACKS = ("attack", "fire_bolt")
+
 
 @dataclass(frozen=True)
 class DiceSpec:
@@ -175,11 +178,16 @@ def choose_boss_action(state: FightState) -> str:
 
 def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> list[ActionResult]:
     """PC acts, then the boss acts unless the fight has ended. The round advances after the boss."""
-    if action != "attack":
+    if action not in PC_ATTACKS:
         raise ValueError(f"Action not supported yet: {action!r}")
 
-    sword = characters["pc"]["attack"]
-    results = [resolve_attack(dice, state.pc, state.boss, "attack", sword["bonus"], sword["damage"])]
+    # Sword and Fire Bolt share the attack rules; Fire Bolt has no uses to spend.
+    pc_attack = characters["pc"][action]
+    results = [
+        resolve_attack(
+            dice, state.pc, state.boss, action, pc_attack["bonus"], pc_attack["damage"]
+        )
+    ]
     if state.boss.hp == 0:
         state.outcome = "victory"
         return results

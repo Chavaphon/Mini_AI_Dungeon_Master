@@ -211,7 +211,7 @@ def test_pc_at_zero_hp_is_defeat():
 
 def test_play_turn_rejects_unbuilt_actions():
     with pytest.raises(ValueError):
-        play_turn(_state(), ScriptedDice([]), _characters(), "fire_bolt")
+        play_turn(_state(), ScriptedDice([]), _characters(), "cure_wounds")
 
 
 def test_same_seed_and_actions_give_same_state():
@@ -234,3 +234,71 @@ def test_result_records_bonus_and_ac_for_roll_display():
     assert (result.bonus, result.target_ac) == (5, 14)
     assert "bonus" not in result.narration_facts()
     assert "target_ac" not in result.narration_facts()
+
+
+# --- Fire Bolt ---------------------------------------------------------------
+
+
+def test_fire_bolt_hit():
+    state = _state()
+    # Lyra: d20 9 + 5 = 14 hits, d10 7. Ashfang misses on 2.
+    results = play_turn(state, ScriptedDice([9, 7, 2]), _characters(), "fire_bolt")
+
+    bolt = results[0]
+    assert (bolt.actor, bolt.action, bolt.target) == ("Lyra", "fire_bolt", "Ashfang")
+    assert bolt.hit and not bolt.critical
+    assert bolt.bonus == 5
+    assert bolt.damage_roll.notation == "1d10"
+    assert bolt.damage == 7
+    assert state.boss.hp == 23
+
+
+def test_fire_bolt_miss():
+    state = _state()
+    dice = ScriptedDice([8, 2])  # 8 + 5 = 13 < 14; boss misses
+    bolt = play_turn(state, dice, _characters(), "fire_bolt")[0]
+
+    assert not bolt.hit and bolt.damage == 0 and bolt.damage_roll is None
+    assert state.boss.hp == 30
+    assert dice.remaining == 0  # no damage dice rolled on a miss
+
+
+def test_fire_bolt_crit_rolls_1d10_twice():
+    state = _state()
+    bolt = play_turn(state, ScriptedDice([20, 4, 9, 2]), _characters(), "fire_bolt")[0]
+
+    assert bolt.hit and bolt.critical
+    assert bolt.damage_roll.notation == "2d10"
+    assert bolt.damage_roll.rolls == (4, 9)
+    assert bolt.damage == 13
+    assert state.boss.hp == 17
+
+
+def test_fire_bolt_natural_1_misses():
+    state = _state()
+    state.boss.ac = 5  # 1 + 5 = 6 would hit without the natural 1 rule
+    bolt = play_turn(state, ScriptedDice([1, 2]), _characters(), "fire_bolt")[0]
+
+    assert not bolt.hit
+    assert state.boss.hp == 30
+
+
+def test_fire_bolt_has_unlimited_uses():
+    state = _state()
+    turns = 10
+    dice = ScriptedDice([2, 2] * turns)  # every cast and every bite misses
+    for _ in range(turns):
+        play_turn(state, dice, _characters(), "fire_bolt")
+
+    assert state.round == turns + 1
+    assert state.cure_wounds_uses == 2
+    assert state.outcome is None
+
+
+def test_fire_bolt_narration_facts_identify_action():
+    results = play_turn(_state(), ScriptedDice([9, 7, 2]), _characters(), "fire_bolt")
+    facts = results[0].narration_facts()
+
+    assert set(facts) == FACT_KEYS
+    assert facts["action"] == "fire_bolt"
+    assert facts["damage"] == 7
