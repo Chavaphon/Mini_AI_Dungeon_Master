@@ -201,7 +201,16 @@ def test_intent_maps_fire_bolt_text():
 
 def test_narration_prompt_names_each_action():
     prompt = load_prompt("narration")
-    for name in ('"attack"', '"fire_bolt"', "Fire Bolt", '"cure_wounds"', "Cure Wounds", '"bite"'):
+    for name in (
+        '"attack"',
+        '"fire_bolt"',
+        "Fire Bolt",
+        '"cure_wounds"',
+        "Cure Wounds",
+        '"bite"',
+        '"fire_breath"',
+        "Fire Breath",
+    ):
         assert name in prompt
 
 

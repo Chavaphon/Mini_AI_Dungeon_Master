@@ -34,7 +34,12 @@ NOT_YET_TEXT = (
     "answers. Strike at Ashfang, hurl a Fire Bolt, cast Cure Wounds or dodge!"
 )
 
-_ACTION_LABELS = {"attack": "sword", "fire_bolt": "Fire Bolt", "bite": "bite"}
+_ACTION_LABELS = {
+    "attack": "sword",
+    "fire_bolt": "Fire Bolt",
+    "bite": "bite",
+    "fire_breath": "Fire Breath",
+}
 
 _BAND_COLOURS = {
     "healthy": "#3a9d5d",
