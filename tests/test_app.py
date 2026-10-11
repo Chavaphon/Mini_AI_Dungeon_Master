@@ -121,13 +121,13 @@ def test_narration_gets_both_actions_as_facts_only():
 
 @pytest.mark.parametrize(
     "intent_reply",
-    ['{"action": "cure_wounds", "target": "self"}', '{"action": "none", "target": ""}', "not json"],
+    ['{"action": "dodge", "target": "self"}', '{"action": "none", "target": ""}', "not json"],
 )
 def test_other_intents_get_stub_and_turn_does_not_advance(intent_reply):
     config, session = _session([])
     llm = FakeLLM([intent_reply])
 
-    reply = play("I heal myself", session, llm, config)
+    reply = play("I dive aside", session, llm, config)
 
     assert reply == NOT_YET_TEXT
     assert len(llm.calls) == 1
@@ -214,8 +214,8 @@ def test_play_appends_rolls_after_narration_and_keeps_them_from_the_model():
 
 def test_stub_reply_has_no_rolls():
     config, session = _session([])
-    llm = FakeLLM(['{"action": "cure_wounds", "target": "self"}'])
-    reply = play("I heal myself", session, llm, config)
+    llm = FakeLLM(['{"action": "dodge", "target": "self"}'])
+    reply = play("I dive aside", session, llm, config)
     assert "🎲" not in reply
 
 
@@ -249,4 +249,82 @@ def test_roll_line_for_fire_bolt_critical():
     assert format_rolls(results).splitlines()[0] == (
         "🎲 Lyra, Fire Bolt: d20 20 (natural 20) vs AC 14 → "
         "critical hit, 2d10: 4 + 9 = 13 damage"
+    )
+
+
+# --- Cure Wounds --------------------------------------------------------------
+
+CURE_WOUNDS = '{"action": "cure_wounds", "target": "self"}'
+HEAL_FACT_KEYS = {
+    "actor",
+    "action",
+    "target",
+    "success",
+    "healing",
+    "target_hp_before",
+    "target_hp_after",
+    "target_max_hp",
+    "target_hp_band",
+    "uses_left",
+}
+
+
+def test_cure_wounds_turn_end_to_end():
+    # Heal d8 5 + 3 = 8 from 10 HP. Ashfang misses on 2.
+    config, session = _session([5, 2])
+    session["state"].pc.hp = 10
+    llm = FakeLLM([CURE_WOUNDS, "Warm light knits your wounds."])
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+
+    _, history, status = submit_turn("I heal myself", history, session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    heal, bite = facts["actions"]
+    assert set(heal) == HEAL_FACT_KEYS
+    assert (heal["action"], heal["healing"], heal["uses_left"]) == ("cure_wounds", 8, 1)
+    assert bite["action"] == "bite"
+    narration, rolls = history[-1]["content"].split("\n\n")
+    assert narration == "Warm light knits your wounds."
+    assert rolls.splitlines() == [
+        "🎲 Lyra, Cure Wounds: 1d8+3: 5 + 3 = 8 healing",
+        "🎲 Ashfang, bite: d20 2 + 5 = 7 vs AC 14 → miss",
+    ]
+    assert "18/30" in status
+    assert "Cure Wounds: 1" in status
+    assert "Round: 2" in status
+
+
+def _heal_turn(faces, pc_hp=30, uses=2):
+    config, session = _session(faces)
+    session["state"].pc.hp = pc_hp
+    session["state"].cure_wounds_uses = uses
+    return play_turn(session["state"], session["dice"], config["characters"], "cure_wounds")
+
+
+def test_roll_line_for_capped_heal():
+    lines = format_rolls(_heal_turn([5, 2], pc_hp=28)).splitlines()
+    assert lines[0] == "🎲 Lyra, Cure Wounds: 1d8+3: 5 + 3 = 8 healing (capped at 30)"
+
+
+def test_roll_line_for_heal_with_no_uses_left():
+    lines = format_rolls(_heal_turn([2], pc_hp=20, uses=0)).splitlines()
+    assert lines == [
+        "🎲 Lyra, Cure Wounds: no uses left",
+        "🎲 Ashfang, bite: d20 2 + 5 = 7 vs AC 14 → miss",
+    ]
+
+
+def test_status_counts_cure_wounds_down_to_zero():
+    config, session = _session([1, 2, 1, 2, 2])
+    llm = FakeLLM([CURE_WOUNDS, "One.", CURE_WOUNDS, "Two.", CURE_WOUNDS, "Spent."])
+    history = []
+
+    for uses_left in (1, 0, 0):  # the third cast fails, the boss still acts
+        _, history, status = submit_turn("I heal myself", history, session, llm, config)
+        assert f"Cure Wounds: {uses_left}" in status
+
+    assert "Round: 4" in status
+    assert history[-1]["content"].endswith(
+        "🎲 Lyra, Cure Wounds: no uses left\n🎲 Ashfang, bite: d20 2 + 5 = 7 vs AC 14 → miss"
     )

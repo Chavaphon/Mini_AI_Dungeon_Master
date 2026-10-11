@@ -211,7 +211,7 @@ def test_pc_at_zero_hp_is_defeat():
 
 def test_play_turn_rejects_unbuilt_actions():
     with pytest.raises(ValueError):
-        play_turn(_state(), ScriptedDice([]), _characters(), "cure_wounds")
+        play_turn(_state(), ScriptedDice([]), _characters(), "dodge")
 
 
 def test_same_seed_and_actions_give_same_state():

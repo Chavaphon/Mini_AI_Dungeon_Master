@@ -12,6 +12,8 @@ _DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 
 # PC actions resolved as attack rolls against Ashfang (config key = action name).
 PC_ATTACKS = ("attack", "fire_bolt")
+# Every PC action the engine can resolve in this build.
+PC_ACTIONS = PC_ATTACKS + ("cure_wounds",)
 
 
 @dataclass(frozen=True)
@@ -171,23 +173,85 @@ def resolve_attack(
     )
 
 
+@dataclass(frozen=True)
+class HealResult:
+    actor: str
+    action: str
+    target: str
+    success: bool
+    healing: int  # HP actually restored, after the max HP cap
+    target_hp_before: int
+    target_hp_after: int
+    target_max_hp: int
+    target_hp_band: str
+    uses_left: int
+    heal_roll: Roll | None
+
+    def narration_facts(self) -> dict:
+        """The FR-7 facts for a Cure Wounds cast. The heal roll stays out of it."""
+        return {
+            "actor": self.actor,
+            "action": self.action,
+            "target": self.target,
+            "success": self.success,
+            "healing": self.healing,
+            "target_hp_before": self.target_hp_before,
+            "target_hp_after": self.target_hp_after,
+            "target_max_hp": self.target_max_hp,
+            "target_hp_band": self.target_hp_band,
+            "uses_left": self.uses_left,
+        }
+
+
+def resolve_cure_wounds(dice: Dice, state: FightState, heal: str) -> HealResult:
+    """Spend one use and heal the PC, capped at max HP. With no uses left the cast fails."""
+    pc = state.pc
+    hp_before = pc.hp
+    heal_roll = None
+    if state.cure_wounds_uses > 0:
+        state.cure_wounds_uses -= 1
+        heal_roll = dice.roll(heal)
+        apply_damage(pc, -heal_roll.total)
+
+    return HealResult(
+        actor=pc.name,
+        action="cure_wounds",
+        target=pc.name,
+        success=heal_roll is not None,
+        healing=pc.hp - hp_before,
+        target_hp_before=hp_before,
+        target_hp_after=pc.hp,
+        target_max_hp=pc.max_hp,
+        target_hp_band=hp_band(pc.hp, pc.max_hp),
+        uses_left=state.cure_wounds_uses,
+        heal_roll=heal_roll,
+    )
+
+
 def choose_boss_action(state: FightState) -> str:
     """Boss policy, code only. Fire Breath arrives in a later slice; for now, Bite."""
     return "bite"
 
 
-def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> list[ActionResult]:
-    """PC acts, then the boss acts unless the fight has ended. The round advances after the boss."""
-    if action not in PC_ATTACKS:
-        raise ValueError(f"Action not supported yet: {action!r}")
-
-    # Sword and Fire Bolt share the attack rules; Fire Bolt has no uses to spend.
-    pc_attack = characters["pc"][action]
-    results = [
-        resolve_attack(
+def _resolve_pc_action(
+    state: FightState, dice: Dice, characters: dict, action: str
+) -> ActionResult | HealResult:
+    if action == "cure_wounds":
+        return resolve_cure_wounds(dice, state, characters["pc"]["cure_wounds"]["heal"])
+    if action in PC_ATTACKS:
+        # Sword and Fire Bolt share the attack rules; Fire Bolt has no uses to spend.
+        pc_attack = characters["pc"][action]
+        return resolve_attack(
             dice, state.pc, state.boss, action, pc_attack["bonus"], pc_attack["damage"]
         )
-    ]
+    raise ValueError(f"Action not supported yet: {action!r}")
+
+
+def play_turn(
+    state: FightState, dice: Dice, characters: dict, action: str
+) -> list[ActionResult | HealResult]:
+    """PC acts, then the boss acts unless the fight has ended. The round advances after the boss."""
+    results = [_resolve_pc_action(state, dice, characters, action)]
     if state.boss.hp == 0:
         state.outcome = "victory"
         return results
