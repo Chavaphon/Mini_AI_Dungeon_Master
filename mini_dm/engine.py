@@ -285,6 +285,8 @@ def _resolve_pc_action(state: FightState, dice: Dice, characters: dict, action: 
 
 def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> list[TurnResult]:
     """PC acts, then the boss acts unless the fight has ended. The round advances after the boss."""
+    if state.outcome:
+        raise ValueError(f"The fight is over: {state.outcome}")
     state.pc_dodging = False  # a dodge ends at the start of the dodger's next turn
     results = [_resolve_pc_action(state, dice, characters, action)]
     if state.boss.hp == 0:
