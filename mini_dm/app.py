@@ -10,7 +10,8 @@ from mini_dm.engine import (
     Combatant,
     Dice,
     FightState,
-    PC_ATTACKS,
+    HealResult,
+    PC_ACTIONS,
     Roll,
     hp_band,
     initial_state,
@@ -25,11 +26,11 @@ OPENING_SCENE = (
     "and fixes its gaze on you, Lyra. What do you do?"
 )
 
-# Placeholder until the other actions land: only the sword and Fire Bolt work in this build.
+# Placeholder until the other actions land: sword, Fire Bolt and Cure Wounds work in this build.
 NOT_YET_TEXT = (
     "Your hand tightens on the hilt of your short sword as embers gather at your "
-    "fingertips. For now, steel and flame are your only answers. Strike at Ashfang "
-    "or hurl a Fire Bolt!"
+    "fingertips. For now, steel, flame and healing light are your only answers. "
+    "Strike at Ashfang, hurl a Fire Bolt or cast Cure Wounds!"
 )
 
 _ACTION_LABELS = {"attack": "sword", "fire_bolt": "Fire Bolt", "bite": "bite"}
@@ -65,16 +66,27 @@ def render_status(state: FightState) -> str:
     )
 
 
-def _damage_text(roll: Roll) -> str:
+def _dice_text(roll: Roll, unit: str) -> str:
     if len(roll.rolls) == 1 and not roll.modifier:
-        return f"{roll.notation}: {roll.total} damage"
+        return f"{roll.notation}: {roll.total} {unit}"
     expression = " + ".join(str(face) for face in roll.rolls)
     if roll.modifier:
         expression += f" {'+' if roll.modifier > 0 else '-'} {abs(roll.modifier)}"
-    return f"{roll.notation}: {expression} = {roll.total} damage"
+    return f"{roll.notation}: {expression} = {roll.total} {unit}"
 
 
-def _roll_line(result: ActionResult) -> str:
+def _heal_line(result: HealResult) -> str:
+    if not result.heal_roll:
+        return f"🎲 {result.actor}, Cure Wounds: no uses left"
+    text = _dice_text(result.heal_roll, "healing")
+    if result.heal_roll.total > result.healing:
+        text += f" (capped at {result.target_max_hp})"
+    return f"🎲 {result.actor}, Cure Wounds: {text}"
+
+
+def _roll_line(result: ActionResult | HealResult) -> str:
+    if isinstance(result, HealResult):
+        return _heal_line(result)
     natural = result.attack_roll.rolls[0]
     if natural in (1, 20):
         attack = f"d20 {natural} (natural {natural})"
@@ -82,12 +94,12 @@ def _roll_line(result: ActionResult) -> str:
         attack = f"d20 {natural} + {result.bonus} = {natural + result.bonus}"
     outcome = "critical hit" if result.critical else "hit" if result.hit else "miss"
     if result.damage_roll:
-        outcome += f", {_damage_text(result.damage_roll)}"
+        outcome += f", {_dice_text(result.damage_roll, 'damage')}"
     label = _ACTION_LABELS.get(result.action, result.action.replace("_", " "))
     return f"🎲 {result.actor}, {label}: {attack} vs AC {result.target_ac} → {outcome}"
 
 
-def format_rolls(results: list[ActionResult]) -> str:
+def format_rolls(results: list[ActionResult | HealResult]) -> str:
     """Code-built roll lines shown under the narration (FR-13). Never sent to the model."""
     return "\n".join(_roll_line(result) for result in results)
 
@@ -100,7 +112,7 @@ def new_session(config: dict) -> dict:
 def play(text: str, session: dict, client, config: dict) -> str:
     """One turn: intent call -> engine (PC then boss) -> one narration call."""
     _raw, intent = request_intent(client, config, text)
-    if intent is None or intent["action"] not in PC_ATTACKS:
+    if intent is None or intent["action"] not in PC_ACTIONS:
         return NOT_YET_TEXT
 
     results = play_turn(session["state"], session["dice"], config["characters"], intent["action"])
