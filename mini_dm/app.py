@@ -9,6 +9,7 @@ from mini_dm.engine import (
     ActionResult,
     Combatant,
     Dice,
+    DodgeResult,
     FightState,
     HealResult,
     PC_ACTIONS,
@@ -26,11 +27,11 @@ OPENING_SCENE = (
     "and fixes its gaze on you, Lyra. What do you do?"
 )
 
-# Placeholder until the other actions land: sword, Fire Bolt and Cure Wounds work in this build.
+# Placeholder until talking lands: sword, Fire Bolt, Cure Wounds and dodge work in this build.
 NOT_YET_TEXT = (
     "Your hand tightens on the hilt of your short sword as embers gather at your "
-    "fingertips. For now, steel, flame and healing light are your only answers. "
-    "Strike at Ashfang, hurl a Fire Bolt or cast Cure Wounds!"
+    "fingertips. For now, steel, flame, healing light and quick feet are your only "
+    "answers. Strike at Ashfang, hurl a Fire Bolt, cast Cure Wounds or dodge!"
 )
 
 _ACTION_LABELS = {"attack": "sword", "fire_bolt": "Fire Bolt", "bite": "bite"}
@@ -84,14 +85,26 @@ def _heal_line(result: HealResult) -> str:
     return f"🎲 {result.actor}, Cure Wounds: {text}"
 
 
-def _roll_line(result: ActionResult | HealResult) -> str:
+def _attack_text(result: ActionResult) -> str:
+    natural = result.natural
+    if result.disadvantage:
+        faces = ", ".join(str(face) for face in result.attack_roll.rolls)
+        prefix = f"2d20 {faces} (disadvantage) → "
+        if natural in (1, 20):
+            return f"{prefix}natural {natural}"
+        return f"{prefix}{natural} + {result.bonus} = {natural + result.bonus}"
+    if natural in (1, 20):
+        return f"d20 {natural} (natural {natural})"
+    return f"d20 {natural} + {result.bonus} = {natural + result.bonus}"
+
+
+def _roll_line(result: ActionResult | HealResult | DodgeResult) -> str:
     if isinstance(result, HealResult):
         return _heal_line(result)
-    natural = result.attack_roll.rolls[0]
-    if natural in (1, 20):
-        attack = f"d20 {natural} (natural {natural})"
-    else:
-        attack = f"d20 {natural} + {result.bonus} = {natural + result.bonus}"
+    if isinstance(result, DodgeResult):
+        actor = result.actor
+        return f"🎲 {actor}, dodge: no roll, attacks against {actor} have disadvantage"
+    attack = _attack_text(result)
     outcome = "critical hit" if result.critical else "hit" if result.hit else "miss"
     if result.damage_roll:
         outcome += f", {_dice_text(result.damage_roll, 'damage')}"
@@ -99,7 +112,7 @@ def _roll_line(result: ActionResult | HealResult) -> str:
     return f"🎲 {result.actor}, {label}: {attack} vs AC {result.target_ac} → {outcome}"
 
 
-def format_rolls(results: list[ActionResult | HealResult]) -> str:
+def format_rolls(results: list[ActionResult | HealResult | DodgeResult]) -> str:
     """Code-built roll lines shown under the narration (FR-13). Never sent to the model."""
     return "\n".join(_roll_line(result) for result in results)
 
