@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 
 from mini_dm.engine import CORRECT_TARGET, PC_ACTIONS, validate_intent
+from mini_dm.guardrails import check_output, narration_template
 
 PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -173,14 +174,67 @@ def resolve_intent(client, config: dict, text: str) -> IntentResolution:
     return resolution
 
 
-def request_narration(client, config: dict, facts: dict) -> str:
-    """Narration call (FR-7): the resolved facts only, at the narration temperature."""
+def request_narration(
+    client, config: dict, facts: dict, retry: tuple[str, str] | None = None
+) -> str:
+    """Narration call (FR-7): the resolved facts only, at the narration temperature.
+
+    `retry` is the previous (raw reply, reasons it failed the output checks), sent back
+    for the one regeneration.
+    """
+    messages = [
+        {"role": "system", "content": load_prompt("narration")},
+        {"role": "user", "content": json.dumps(facts)},
+    ]
+    if retry:
+        raw, reason = retry
+        messages += [
+            {"role": "assistant", "content": raw},
+            {
+                "role": "user",
+                "content": f"That narration broke the rules: {reason} "
+                "Rewrite it in 2-4 sentences using only the facts.",
+            },
+        ]
     text = client.chat(
-        [
-            {"role": "system", "content": load_prompt("narration")},
-            {"role": "user", "content": json.dumps(facts)},
-        ],
+        messages,
         temperature=config["narration"]["temperature"],
         num_predict=config["narration"]["num_predict"],
     )
     return text.strip()
+
+
+@dataclass
+class NarrationResult:
+    text: str
+    raw_replies: list[str] = field(default_factory=list)
+    triggers: list[dict] = field(default_factory=list)  # output guardrail matches, every call
+    source: str = "template"  # "llm", "retry" or "template"
+
+
+def narrate(client, config: dict, facts: dict) -> NarrationResult:
+    """Narration call checked by GR-3, GR-7 and GR-8, with one shared regeneration.
+
+    At most `max_llm_calls_per_phase` calls (GR-9); if every reply fails, the safe template.
+    """
+    result = NarrationResult(text="")
+    narration = config["narration"]
+    retry = None
+    for attempt in range(config["limits"]["max_llm_calls_per_phase"]):
+        raw = request_narration(client, config, facts, retry)
+        result.raw_replies.append(raw)
+        check = check_output(
+            raw,
+            json.dumps(facts),
+            max_sentences=narration["max_sentences"],
+            max_chars=narration["max_chars"],
+        )
+        result.triggers += check.triggers
+        if check.passed:
+            result.text = check.text
+            result.source = "llm" if attempt == 0 else "retry"
+            return result
+        retry = (raw, " ".join(check.reasons))
+
+    result.text = narration_template(facts)
+    return result
