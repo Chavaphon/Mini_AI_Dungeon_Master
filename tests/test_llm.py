@@ -517,6 +517,12 @@ def test_narration_prompt_explains_cure_wounds_facts():
         assert field in prompt
 
 
+def test_narration_prompt_explains_full_hp_cure():
+    prompt = load_prompt("narration")
+    assert '"healing" is 0' in prompt
+    assert "full health" in prompt
+
+
 def test_narration_prompt_explains_wrong_targets():
     prompt = load_prompt("narration")
     assert "herself" in prompt
