@@ -12,8 +12,10 @@ from mini_dm.engine import (
     DodgeResult,
     FightState,
     HealResult,
+    NoActionResult,
     PC_ACTIONS,
     Roll,
+    TurnResult,
     hp_band,
     initial_state,
     play_turn,
@@ -27,11 +29,12 @@ OPENING_SCENE = (
     "and fixes its gaze on you, Lyra. What do you do?"
 )
 
-# Placeholder until talking lands: sword, Fire Bolt, Cure Wounds and dodge work in this build.
-NOT_YET_TEXT = (
-    "Your hand tightens on the hilt of your short sword as embers gather at your "
-    "fingertips. For now, steel, flame, healing light and quick feet are your only "
-    "answers. Strike at Ashfang, hurl a Fire Bolt, cast Cure Wounds or dodge!"
+# Reply when the intent cannot be read; the turn does not advance.
+# Placeholder until the FR-4 retry and fallback parser land (#11).
+REPHRASE_TEXT = (
+    "Ashfang's roar drowns out your thoughts for a moment. What do you do, Lyra? "
+    "Strike with your sword, hurl a Fire Bolt, cast Cure Wounds, dodge, or say "
+    "something to the drake."
 )
 
 # Fixed reply once the fight has ended: no model call, no state change.
@@ -112,9 +115,11 @@ def _attack_text(result: ActionResult) -> str:
     return f"d20 {natural} + {result.bonus} = {natural + result.bonus}"
 
 
-def _roll_line(result: ActionResult | HealResult | DodgeResult) -> str:
+def _roll_line(result: TurnResult) -> str:
     if isinstance(result, HealResult):
         return _heal_line(result)
+    if isinstance(result, NoActionResult):
+        return f"🎲 {result.actor}, no combat action: no roll"
     if isinstance(result, DodgeResult):
         actor = result.actor
         return f"🎲 {actor}, dodge: no roll, attacks against {actor} have disadvantage"
@@ -126,7 +131,7 @@ def _roll_line(result: ActionResult | HealResult | DodgeResult) -> str:
     return f"🎲 {result.actor}, {label}: {attack} vs AC {result.target_ac} → {outcome}"
 
 
-def format_rolls(results: list[ActionResult | HealResult | DodgeResult]) -> str:
+def format_rolls(results: list[TurnResult]) -> str:
     """Code-built roll lines shown under the narration (FR-13). Never sent to the model."""
     return "\n".join(_roll_line(result) for result in results)
 
@@ -144,10 +149,12 @@ def play(text: str, session: dict, client, config: dict) -> str:
 
     _raw, intent = request_intent(client, config, text)
     if intent is None or intent["action"] not in PC_ACTIONS:
-        return NOT_YET_TEXT
+        return REPHRASE_TEXT
 
     results = play_turn(state, session["dice"], config["characters"], intent["action"])
     facts = {"actions": [result.narration_facts() for result in results]}
+    if intent["action"] == "none":
+        facts["actions"][0]["player_input"] = text  # so the narration can describe it (FR-8)
     if state.outcome:
         facts["outcome"] = state.outcome  # the closing narration (FR-10)
     return f"{request_narration(client, config, facts)}\n\n{format_rolls(results)}"

@@ -13,7 +13,7 @@ _DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 # PC actions resolved as attack rolls against Ashfang (config key = action name).
 PC_ATTACKS = ("attack", "fire_bolt")
 # Every PC action the engine can resolve in this build.
-PC_ACTIONS = PC_ATTACKS + ("cure_wounds", "dodge")
+PC_ACTIONS = PC_ATTACKS + ("cure_wounds", "dodge", "none")
 
 
 @dataclass(frozen=True)
@@ -259,6 +259,22 @@ def resolve_dodge(state: FightState) -> DodgeResult:
     return DodgeResult(actor=state.pc.name, action="dodge", target=state.pc.name)
 
 
+@dataclass(frozen=True)
+class NoActionResult:
+    actor: str
+    action: str
+    target: str
+
+    def narration_facts(self) -> dict:
+        """The FR-7 facts for a `none` action: who acted, the action and the target."""
+        return {"actor": self.actor, "action": self.action, "target": self.target}
+
+
+def resolve_no_action(state: FightState) -> NoActionResult:
+    """The PC talks, looks or taunts (FR-8): no roll and no change to state."""
+    return NoActionResult(actor=state.pc.name, action="none", target="")
+
+
 def choose_boss_action(state: FightState, trigger_hp_pct: int) -> str:
     """Boss policy, code only: Fire Breath once, when HP is at or below the trigger; else Bite."""
     if not state.fire_breath_used and state.boss.hp * 100 <= state.boss.max_hp * trigger_hp_pct:
@@ -266,10 +282,12 @@ def choose_boss_action(state: FightState, trigger_hp_pct: int) -> str:
     return "bite"
 
 
-TurnResult = ActionResult | HealResult | DodgeResult
+TurnResult = ActionResult | HealResult | DodgeResult | NoActionResult
 
 
 def _resolve_pc_action(state: FightState, dice: Dice, characters: dict, action: str) -> TurnResult:
+    if action == "none":
+        return resolve_no_action(state)
     if action == "dodge":
         return resolve_dodge(state)
     if action == "cure_wounds":
@@ -280,7 +298,7 @@ def _resolve_pc_action(state: FightState, dice: Dice, characters: dict, action: 
         return resolve_attack(
             dice, state.pc, state.boss, action, pc_attack["bonus"], pc_attack["damage"]
         )
-    raise ValueError(f"Action not supported yet: {action!r}")
+    raise ValueError(f"Unknown action: {action!r}")
 
 
 def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> list[TurnResult]:

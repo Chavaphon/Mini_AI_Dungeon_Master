@@ -7,8 +7,8 @@ import pytest
 from fakes import FakeLLM, ScriptedDice
 from mini_dm.app import (
     FIGHT_OVER_TEXT,
-    NOT_YET_TEXT,
     OPENING_SCENE,
+    REPHRASE_TEXT,
     build_ui,
     format_rolls,
     new_session,
@@ -123,17 +123,13 @@ def test_narration_gets_both_actions_as_facts_only():
     assert (ashfang["actor"], ashfang["action"], ashfang["damage"]) == ("Ashfang", "bite", 7)
 
 
-@pytest.mark.parametrize(
-    "intent_reply",
-    ['{"action": "none", "target": ""}', "not json"],
-)
-def test_other_intents_get_stub_and_turn_does_not_advance(intent_reply):
+def test_unparseable_intent_asks_to_rephrase_and_turn_does_not_advance():
     config, session = _session([])
-    llm = FakeLLM([intent_reply])
+    llm = FakeLLM(["not json"])
 
     reply = play("I dive aside", session, llm, config)
 
-    assert reply == NOT_YET_TEXT
+    assert reply == REPHRASE_TEXT
     assert len(llm.calls) == 1
     assert session["state"] == initial_state(config["characters"])
 
@@ -216,9 +212,9 @@ def test_play_appends_rolls_after_narration_and_keeps_them_from_the_model():
     assert "🎲" not in sent and "d20" not in sent
 
 
-def test_stub_reply_has_no_rolls():
+def test_rephrase_reply_has_no_rolls():
     config, session = _session([])
-    llm = FakeLLM(['{"action": "none", "target": ""}'])
+    llm = FakeLLM(["not json"])
     reply = play("I look around", session, llm, config)
     assert "🎲" not in reply
 
@@ -376,6 +372,59 @@ def test_status_shows_dodge_ending_on_next_turn():
 def _dodge_turn(faces):
     config, session = _session(faces)
     return play_turn(session["state"], session["dice"], config["characters"], "dodge")
+
+
+# --- none: talk, look, taunt (FR-8) -------------------------------------------
+
+NONE = '{"action": "none", "target": ""}'
+
+
+def test_none_turn_end_to_end():
+    # Lyra taunts. Ashfang hits: 15 + 5 = 20, bite 5 + 2 = 7.
+    config, session = _session([15, 5])
+    llm = FakeLLM([NONE, "You jeer at the drake; it snaps back and catches your arm."])
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+
+    _, history, status = submit_turn("I taunt the drake", history, session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    lyra, bite = facts["actions"]
+    assert lyra == {
+        "actor": "Lyra",
+        "action": "none",
+        "target": "",
+        "player_input": "I taunt the drake",
+    }
+    assert (bite["action"], bite["damage"]) == ("bite", 7)
+    narration, rolls = history[-1]["content"].split("\n\n")
+    assert narration == "You jeer at the drake; it snaps back and catches your arm."
+    assert rolls.splitlines() == [
+        "🎲 Lyra, no combat action: no roll",
+        "🎲 Ashfang, bite: d20 15 + 5 = 20 vs AC 14 → hit, 1d8+2: 5 + 2 = 7 damage",
+    ]
+    state = session["state"]
+    assert (state.pc.hp, state.boss.hp, state.round) == (23, 30, 2)
+    assert state.cure_wounds_uses == initial_state(config["characters"]).cure_wounds_uses
+    assert "23/30" in status and "Round: 2" in status
+
+
+def test_none_turn_defeat_marks_the_fight_over():
+    config, session = _session([15, 5])
+    session["state"].pc.hp = 3
+    llm = FakeLLM([NONE, "You fall."])
+
+    play("I look around", session, llm, config)
+
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    assert facts["outcome"] == "defeat"
+    assert facts["actions"][0]["player_input"] == "I look around"
+
+
+def test_roll_line_for_none():
+    config, session = _session([2])
+    results = play_turn(session["state"], session["dice"], config["characters"], "none")
+    assert format_rolls(results).splitlines()[0] == "🎲 Lyra, no combat action: no roll"
 
 
 def test_roll_line_for_disadvantage_natural_1():
