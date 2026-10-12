@@ -56,6 +56,10 @@ FIGHT_OVER_TEXT = (
     "This fight is over. Press Restart to face Ashfang again."
 )
 
+# Gradio's Chatbot Clear button has no off switch. It only wipes the chat, not the fight,
+# so it is hidden; Restart is the way to reset.
+UI_CSS = '#fight button[aria-label="Clear"] { display: none; }'
+
 _ACTION_LABELS = {
     "attack": "sword",
     "fire_bolt": "Fire Bolt",
@@ -281,6 +285,7 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
                 chatbot = gr.Chatbot(
                     value=[{"role": "assistant", "content": OPENING_SCENE}],
                     label="The fight",
+                    elem_id="fight",
                     height=420,
                 )
                 textbox = gr.Textbox(
@@ -299,6 +304,8 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
             on_submit,
             inputs=[textbox, chatbot, session],
             outputs=[textbox, chatbot, status, session],
+            show_progress="minimal",
+            show_progress_on=chatbot,  # one indicator, not one per output
         )
         restart_button.click(
             lambda: restart(config, log_dir),
@@ -313,7 +320,7 @@ def main() -> None:
     print("Loading the model...", flush=True)
     if not client.warm_up(config["ollama"]["warmup_timeout_s"]):
         print("Warning: the model did not load. Is Ollama running?", flush=True)
-    build_ui(config, client, turnlog.log_dir(config)).launch(server_name="127.0.0.1")
+    build_ui(config, client, turnlog.log_dir(config)).launch(server_name="127.0.0.1", css=UI_CSS)
 
 
 if __name__ == "__main__":
