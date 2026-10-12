@@ -8,6 +8,7 @@ from mini_dm.guardrails import (
     check_help_secret,
     check_input,
     check_output,
+    names_missing_item,
     narration_template,
     numbers_in,
 )
@@ -165,6 +166,36 @@ def test_normal_input_passes_with_no_triggers(text):
     assert not check.blocked
     assert check.response is None
     assert check.triggers == []
+
+
+# --- GR-2 / FR-4: items Lyra does not carry -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I throw a bomb at Ashfang",
+        "I read a scroll of fireball",
+        "I use my wand of lightning",
+        "I hurl a GRENADE",
+    ],
+)
+def test_items_lyra_does_not_carry_are_named(text):
+    assert names_missing_item(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I cast magic missile at the drake",
+        "I cast Meteor Swarm",
+        "I cast Fire Bolt",
+        "I swing my sword",
+        "I bombard it with insults",
+    ],
+)
+def test_spells_and_the_short_sword_are_not_items(text):
+    assert not names_missing_item(text)
 
 
 # --- several triggers -------------------------------------------------------------

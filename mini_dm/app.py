@@ -24,7 +24,7 @@ from mini_dm.engine import (
     restore,
     snapshot,
 )
-from mini_dm.guardrails import check_input
+from mini_dm.guardrails import check_input, names_missing_item
 from mini_dm.help import answer_help
 from mini_dm.llm import (
     UNAVAILABLE_TEXT,
@@ -52,6 +52,12 @@ SPELL_REFUSAL_TEXT = (
     "The words of an unfamiliar spell die on your lips. You know only Fire Bolt and "
     "Cure Wounds. What do you do, Lyra? Strike with your sword, hurl a Fire Bolt, "
     "cast Cure Wounds, dodge, or say something to the drake."
+)
+# When the refused input also names an item Lyra does not carry (FR-4).
+ITEM_REFUSAL_TEXT = (
+    "You reach for it, but your pack holds nothing of the kind. You carry only your short "
+    "sword. What do you do, Lyra? Strike with your sword, hurl a Fire Bolt, cast Cure "
+    "Wounds, dodge, or say something to the drake."
 )
 
 # Fixed reply once the fight has ended: no model call, no state change.
@@ -220,6 +226,9 @@ def _play(text: str, session: dict, client, config: dict, record: dict) -> str:
         record.update(validation=resolution.validation, intent_source=resolution.source)
         intent = resolution.intent
         if intent is None:
+            if resolution.unknown_action and names_missing_item(text):
+                record["status"] = "refused_item"
+                return ITEM_REFUSAL_TEXT
             if resolution.unknown_action:
                 record["status"] = "refused_spell"
                 return SPELL_REFUSAL_TEXT
