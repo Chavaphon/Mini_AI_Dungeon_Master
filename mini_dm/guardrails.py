@@ -349,7 +349,10 @@ _MISSING_ITEM_PATTERN = re.compile(
 
 
 def names_missing_item(text: str) -> bool:
-    """True if the input names an item Lyra does not carry, for the item refusal (FR-4)."""
+    """True if the input names an item Lyra does not carry, for the item refusal (FR-4).
+
+    Also checked when the intent is `none`, so the refusal does not depend on the model (FR-8).
+    """
     return _MISSING_ITEM_PATTERN.search(text) is not None
 
 
