@@ -1,9 +1,11 @@
 """Gradio chat UI and status panel. Run from the repo root: python -m mini_dm.app"""
 
 import html
+from pathlib import Path
 
 import gradio as gr
 
+from mini_dm import turnlog
 from mini_dm.config import load_config
 from mini_dm.engine import (
     ActionResult,
@@ -153,30 +155,66 @@ def format_rolls(results: list[TurnResult]) -> str:
     return "\n".join(_roll_line(result) for result in results)
 
 
-def new_session(config: dict) -> dict:
-    """Fresh fight state plus the single seeded dice roller for this session."""
-    return {"state": initial_state(config["characters"]), "dice": Dice(config["seed"])}
+def new_session(config: dict, log_dir: Path | None = None) -> dict:
+    """Fresh fight state plus the single seeded dice roller for this session.
+
+    With a `log_dir`, the session's turns are logged to a new JSONL file there (FR-11).
+    """
+    return {
+        "state": initial_state(config["characters"]),
+        "dice": Dice(config["seed"]),
+        "log_path": turnlog.new_log_path(log_dir) if log_dir else None,
+        "turns": 0,
+    }
 
 
 def play(text: str, session: dict, client, config: dict) -> str:
     """One turn: input guardrails -> intent call -> engine (PC then boss) -> narration call
-    -> output guardrails."""
+    -> output guardrails -> turn log.
+
+    Every submission is recorded in session["last_turn"] and, when logging, the JSONL log.
+    """
+    state = session["state"]
+    log_path = session["log_path"]
+    session["turns"] += 1
+    record = turnlog.new_record(
+        log_path.stem if log_path else None, config["seed"], session["turns"], text, state
+    )
+    record["reply"] = _play(text, session, client, config, record)
+    record["state_after"] = turnlog.state_dict(state)
+    session["last_turn"] = record
+    if log_path:
+        turnlog.append(log_path, record)
+    return record["reply"]
+
+
+def _play(text: str, session: dict, client, config: dict, record: dict) -> str:
     state = session["state"]
     if state.outcome:
+        record["status"] = "fight_over"
         return FIGHT_OVER_TEXT
 
     check = check_input(text, config["limits"]["input_max_chars"])
-    session["guardrail_triggers"] = check.triggers  # for the turn log (FR-11)
+    record["guardrail_triggers"] = check.triggers
     if check.blocked:
         intent = {"action": "none", "target": "self"}  # forced none, no intent call (FR-8)
+        record["intent_source"] = "guardrail"
     else:
         try:
             resolution = resolve_intent(client, config, text)
-        except LLMUnavailable:
+        except LLMUnavailable as err:
+            record.update(status="unavailable", error=str(err))
             return UNAVAILABLE_TEXT  # nothing has changed yet (GR-9)
+        record["raw_llm_outputs"]["intent"] = resolution.raw_replies
+        record.update(validation=resolution.validation, intent_source=resolution.source)
         intent = resolution.intent
         if intent is None:
-            return SPELL_REFUSAL_TEXT if resolution.unknown_action else REPHRASE_TEXT
+            if resolution.unknown_action:
+                record["status"] = "refused_spell"
+                return SPELL_REFUSAL_TEXT
+            record["status"] = "refused_rephrase"
+            return REPHRASE_TEXT
+    record["parsed_action"] = intent
 
     saved = snapshot(state, session["dice"])
     results = play_turn(
@@ -190,10 +228,18 @@ def play(text: str, session: dict, client, config: dict) -> str:
     # Output guardrails, then the template (GR-3/7/8).
     try:
         narration = narrate(client, config, facts)
-    except LLMUnavailable:
+    except LLMUnavailable as err:
         restore(state, session["dice"], saved)  # no turn without its narration (GR-9)
+        record.update(status="unavailable", error=str(err))
         return UNAVAILABLE_TEXT
-    session["guardrail_triggers"] = check.triggers + narration.triggers
+    record["raw_llm_outputs"]["narration"] = narration.raw_replies
+    record.update(
+        dice_rolls=turnlog.dice_rolls(results),
+        facts=facts,
+        narration=narration.text,
+        narration_source=narration.source,
+        guardrail_triggers=check.triggers + narration.triggers,
+    )
     reply = f"{narration.text}\n\n{format_rolls(results)}"
     return f"{check.response}\n\n{reply}" if check.blocked else reply
 
@@ -210,16 +256,19 @@ def submit_turn(text: str, history: list, session: dict, client, config: dict):
     return "", history, render_status(session["state"])
 
 
-def restart(config: dict):
-    """Restart handler: returns (cleared textbox, chat history, status HTML, fresh session)."""
-    session = new_session(config)
+def restart(config: dict, log_dir: Path | None = None):
+    """Restart handler: returns (cleared textbox, chat history, status HTML, fresh session).
+
+    The fresh session logs to a new file in `log_dir`, if given.
+    """
+    session = new_session(config, log_dir)
     history = [{"role": "assistant", "content": OPENING_SCENE}]
     return "", history, render_status(session["state"]), session
 
 
-def build_ui(config: dict, client=None) -> gr.Blocks:
+def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Blocks:
     client = client or client_from_config(config)
-    initial = new_session(config)
+    initial = new_session(config, log_dir)
 
     with gr.Blocks(title="Mini AI Dungeon Master") as demo:
         session = gr.State(initial)
@@ -249,7 +298,7 @@ def build_ui(config: dict, client=None) -> gr.Blocks:
             outputs=[textbox, chatbot, status, session],
         )
         restart_button.click(
-            lambda: restart(config),
+            lambda: restart(config, log_dir),
             outputs=[textbox, chatbot, status, session],
         )
     return demo
@@ -261,7 +310,7 @@ def main() -> None:
     print("Loading the model...", flush=True)
     if not client.warm_up(config["ollama"]["warmup_timeout_s"]):
         print("Warning: the model did not load. Is Ollama running?", flush=True)
-    build_ui(config, client).launch(server_name="127.0.0.1")
+    build_ui(config, client, turnlog.log_dir(config)).launch(server_name="127.0.0.1")
 
 
 if __name__ == "__main__":

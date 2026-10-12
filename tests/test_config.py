@@ -23,6 +23,7 @@ def test_config_has_required_values():
         "max_chars": 600,
     }
     assert config["limits"] == {"input_max_chars": 300, "max_llm_calls_per_phase": 2}
+    assert config["logging"] == {"dir": "logs"}
 
 
 def test_config_character_stats_match_section_5():

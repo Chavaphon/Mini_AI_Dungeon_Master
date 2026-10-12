@@ -143,6 +143,7 @@ mini_dm/
   engine.py          # state, dice, rules, boss policy
   llm.py             # Ollama client, intent and narration calls
   guardrails.py      # input, output and integrity checks
+  turnlog.py         # JSONL turn log (FR-11)
   app.py             # Gradio chat UI and status panel
   prompts/
     intent.txt

@@ -319,6 +319,26 @@ def test_fallback_parser_runs_when_both_attempts_fail():
     assert resolution.source == "fallback"
 
 
+def test_validation_records_none_for_a_valid_first_reply():
+    resolution = resolve_intent(FakeLLM([ATTACK]), load_config(), "I swing my sword")
+    assert resolution.validation == [None]
+
+
+def test_validation_records_the_reason_for_each_failed_attempt():
+    resolution = resolve_intent(FakeLLM(["not json", ATTACK]), load_config(), "I attack")
+
+    reason, ok = resolution.validation
+    assert "JSON" in reason
+    assert ok is None
+
+
+def test_validation_records_unknown_actions_on_both_attempts():
+    resolution = resolve_intent(FakeLLM([METEOR, METEOR]), load_config(), "I cast Meteor Swarm")
+
+    assert len(resolution.validation) == 2
+    assert all("meteor_swarm" in reason for reason in resolution.validation)
+
+
 def test_resolve_intent_never_makes_more_than_two_calls():
     llm = FakeLLM(["bad", "bad", "bad"])
     config = load_config()
