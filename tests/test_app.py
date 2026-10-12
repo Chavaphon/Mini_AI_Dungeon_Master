@@ -11,6 +11,7 @@ from mini_dm.app import (
     OPENING_SCENE,
     REPHRASE_TEXT,
     SPELL_REFUSAL_TEXT,
+    UI_CSS,
     UNAVAILABLE_TEXT,
     build_ui,
     format_rolls,
@@ -166,6 +167,22 @@ def test_build_ui_input_is_enabled():
     demo = build_ui(rules_config(), client=FakeLLM([]))
     [textbox] = _components(demo, gr.Textbox)
     assert textbox.interactive is True
+
+
+def test_ui_css_hides_the_chat_clear_button():
+    # Gradio's built-in Clear only wipes the chat, not the fight; Restart is the reset.
+    demo = build_ui(rules_config(), client=FakeLLM([]))
+    [chatbot] = _components(demo, gr.Chatbot)
+    assert f'#{chatbot.elem_id} button[aria-label="Clear"]' in UI_CSS
+    assert "display: none" in UI_CSS
+
+
+def test_build_ui_turn_shows_one_minimal_progress_on_the_chat():
+    demo = build_ui(rules_config(), client=FakeLLM([]))
+    [chatbot] = _components(demo, gr.Chatbot)
+    [submit] = [dep for dep in demo.config["dependencies"] if dep["targets"][0][1] == "submit"]
+    assert submit["show_progress"] == "minimal"
+    assert submit["show_progress_on"] == [chatbot._id]
 
 
 # --- roll display (FR-13) -----------------------------------------------------
@@ -982,6 +999,19 @@ def test_spell_refusal_is_logged_with_both_raw_replies_and_reasons(tmp_path):
     assert line["dice_rolls"] == [] and line["narration"] is None
     assert line["state_after"] == line["state_before"]
     assert line["reply"] == SPELL_REFUSAL_TEXT
+
+
+def test_each_turn_logs_its_latency(tmp_path):
+    config, session = _logged_session(tmp_path, [10, 4, 12, 5])
+    meteor = '{"action": "meteor_swarm", "target": "ashfang"}'
+    llm = FakeLLM([ATTACK, "Your blade bites; Ashfang bites back.", meteor, meteor])
+
+    play("I attack", session, llm, config)  # resolved
+    play("I cast Meteor Swarm", session, llm, config)  # refused
+
+    latencies = [line["latency_s"] for line in _lines(session)]
+    assert all(isinstance(value, float) and value >= 0 for value in latencies)
+    assert len(latencies) == 2
 
 
 def test_rephrase_refusal_is_logged(tmp_path):
