@@ -21,6 +21,9 @@
     "input_max_chars": 300,
     "max_llm_calls_per_phase": 2
   },
+  "logging": {
+    "dir": "logs"
+  },
   "characters": {
     "pc": {
       "name": "Lyra",

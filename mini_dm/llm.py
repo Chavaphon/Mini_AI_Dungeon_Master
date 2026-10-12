@@ -143,6 +143,7 @@ def fallback_intent(text: str) -> dict | None:
 class IntentResolution:
     intent: dict | None  # None: refuse and ask to rephrase; the turn does not advance
     raw_replies: list[str] = field(default_factory=list)
+    validation: list[str | None] = field(default_factory=list)  # per attempt: reason, or None
     source: str | None = None  # "llm", "retry" or "fallback"
     unknown_action: bool = False  # some attempt proposed an action not on the allow-list
 
@@ -163,6 +164,7 @@ def resolve_intent(client, config: dict, text: str) -> IntentResolution:
         else:
             reason = validate_intent(intent["action"], intent["target"])
             if reason is None:
+                resolution.validation.append(None)
                 resolution.intent = intent
                 resolution.source = "llm" if attempt == 0 else "retry"
                 return resolution
@@ -175,6 +177,7 @@ def resolve_intent(client, config: dict, text: str) -> IntentResolution:
                     f" {action!r} is not the same as any of Lyra's actions. If the player "
                     f"asked for {action!r}, reply exactly {json.dumps(intent)}."
                 )
+        resolution.validation.append(reason)
         retry = (raw, reason)
 
     resolution.intent = fallback_intent(text)

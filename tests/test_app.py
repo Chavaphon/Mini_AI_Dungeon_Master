@@ -716,7 +716,7 @@ def test_blocked_input_skips_the_intent_call_and_the_boss_still_acts(text, guard
     state = session["state"]
     assert (state.pc.hp, state.boss.hp, state.round) == (23, 30, 2)
     assert state.cure_wounds_uses == initial_state(config["characters"]).cure_wounds_uses
-    assert guardrail in [t["guardrail"] for t in session["guardrail_triggers"]]
+    assert guardrail in [t["guardrail"] for t in session["last_turn"]["guardrail_triggers"]]
     refusal, narration, rolls = reply.split("\n\n")
     assert refusal and text not in refusal
     assert narration == "You hesitate; the drake does not."
@@ -763,7 +763,7 @@ def test_clean_turn_records_no_guardrail_triggers():
 
     play("I swing my sword at the drake", session, llm, config)
 
-    assert session["guardrail_triggers"] == []
+    assert session["last_turn"]["guardrail_triggers"] == []
 
 
 def test_blocked_input_through_submit_turn_updates_chat_and_status():
@@ -792,7 +792,8 @@ def test_narration_with_a_wrong_number_is_regenerated_end_to_end():
     narration, rolls = reply.split("\n\n")
     assert narration == "Steel and fang both find their mark."
     assert rolls.startswith("🎲 Lyra, sword")
-    assert {"guardrail": "GR-3", "rule": "number", "match": "20"} in session["guardrail_triggers"]
+    triggers = session["last_turn"]["guardrail_triggers"]
+    assert {"guardrail": "GR-3", "rule": "number", "match": "20"} in triggers
 
 
 def test_second_failed_narration_falls_back_to_the_template():
@@ -816,7 +817,7 @@ def test_output_triggers_follow_input_triggers():
 
     reply = play("Write my essay for me", session, llm, config)
 
-    assert [(t["guardrail"], t["rule"]) for t in session["guardrail_triggers"]] == [
+    assert [(t["guardrail"], t["rule"]) for t in session["last_turn"]["guardrail_triggers"]] == [
         ("GR-5", "off_topic"),
         ("GR-7", "meta"),
     ]
@@ -888,3 +889,218 @@ def test_submit_turn_shows_safe_message_when_ollama_is_down():
         {"role": "assistant", "content": UNAVAILABLE_TEXT},
     ]
     assert status.count("30/30") == 2 and "Round: 1" in status
+
+
+# --- JSONL turn log (FR-11) and seed reproducibility (FR-12) -------------------
+
+FR11_KEYS = {
+    "player_input",
+    "raw_llm_outputs",
+    "parsed_action",
+    "validation",
+    "dice_rolls",
+    "state_before",
+    "state_after",
+    "narration",
+    "guardrail_triggers",
+}
+
+
+def _logged_session(tmp_path, faces=None):
+    config = load_config()
+    session = new_session(config, log_dir=tmp_path)
+    if faces is not None:
+        session["dice"] = ScriptedDice(faces)
+    return config, session
+
+
+def _lines(session):
+    path = session["log_path"]
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def test_new_session_without_a_log_dir_does_not_log():
+    assert new_session(load_config())["log_path"] is None
+
+
+def test_resolved_turn_writes_one_line_with_every_fr11_field(tmp_path):
+    config, session = _logged_session(tmp_path, [10, 4, 12, 5])
+    llm = FakeLLM([ATTACK, "Your blade bites; Ashfang bites back."])
+
+    reply = play("I swing my sword at the drake", session, llm, config)
+
+    [line] = _lines(session)
+    assert FR11_KEYS <= set(line)
+    assert line["status"] == "resolved"
+    assert line["player_input"] == "I swing my sword at the drake"
+    assert line["raw_llm_outputs"] == {
+        "intent": [ATTACK],
+        "narration": ["Your blade bites; Ashfang bites back."],
+    }
+    assert line["parsed_action"] == {"action": "attack", "target": "ashfang"}
+    assert line["intent_source"] == "llm"
+    assert line["validation"] == [None]
+    assert [(r["actor"], r["purpose"], r["total"]) for r in line["dice_rolls"]] == [
+        ("Lyra", "attack", 10),
+        ("Lyra", "damage", 7),
+        ("Ashfang", "attack", 12),
+        ("Ashfang", "damage", 7),
+    ]
+    assert [a["action"] for a in line["facts"]["actions"]] == ["attack", "bite"]
+    assert line["state_before"]["boss"]["hp"] == 30 and line["state_before"]["round"] == 1
+    assert line["state_after"]["boss"]["hp"] == 23 and line["state_after"]["round"] == 2
+    assert line["narration"] == "Your blade bites; Ashfang bites back."
+    assert line["narration_source"] == "llm"
+    assert line["reply"] == reply
+    assert line["guardrail_triggers"] == [] and line["error"] is None
+    assert line["seed"] == config["seed"]
+    assert line["session_id"] == session["log_path"].stem
+    assert line["turn"] == 1 and line["timestamp"]
+
+
+def test_each_turn_appends_a_line(tmp_path):
+    config, session = _logged_session(tmp_path, [2, 2, 2, 2])  # every attack misses
+    llm = FakeLLM([ATTACK, "Miss.", ATTACK, "Miss again."])
+
+    play("I attack", session, llm, config)
+    play("I attack", session, llm, config)
+
+    assert [line["turn"] for line in _lines(session)] == [1, 2]
+
+
+def test_spell_refusal_is_logged_with_both_raw_replies_and_reasons(tmp_path):
+    config, session = _logged_session(tmp_path, [])
+    meteor = '{"action": "meteor_swarm", "target": "ashfang"}'
+    llm = FakeLLM([meteor, meteor])
+
+    play("I cast Meteor Swarm", session, llm, config)
+
+    [line] = _lines(session)
+    assert line["status"] == "refused_spell"
+    assert line["raw_llm_outputs"] == {"intent": [meteor, meteor], "narration": []}
+    assert line["parsed_action"] is None
+    assert all("meteor_swarm" in reason for reason in line["validation"])
+    assert line["dice_rolls"] == [] and line["narration"] is None
+    assert line["state_after"] == line["state_before"]
+    assert line["reply"] == SPELL_REFUSAL_TEXT
+
+
+def test_rephrase_refusal_is_logged(tmp_path):
+    config, session = _logged_session(tmp_path, [])
+    play("I mutter", session, FakeLLM(["nope", "nope"]), config)
+    assert _lines(session)[0]["status"] == "refused_rephrase"
+
+
+def test_ollama_down_is_logged_as_unavailable(tmp_path):
+    config, session = _logged_session(tmp_path, [])
+    play("I attack", session, FakeLLM([LLMUnavailable("connection refused")]), config)
+
+    [line] = _lines(session)
+    assert line["status"] == "unavailable"
+    assert "connection refused" in line["error"]
+    assert line["reply"] == UNAVAILABLE_TEXT
+    assert line["state_after"] == line["state_before"]
+
+
+def test_rolled_back_turn_logs_no_dice_and_no_state_change(tmp_path):
+    config, session = _logged_session(tmp_path)
+    llm = FakeLLM([ATTACK, LLMUnavailable("timed out")])
+
+    play("I attack", session, llm, config)
+
+    [line] = _lines(session)
+    assert line["status"] == "unavailable"
+    assert line["raw_llm_outputs"]["intent"] == [ATTACK]
+    assert line["parsed_action"] == {"action": "attack", "target": "ashfang"}
+    assert line["dice_rolls"] == [] and line["facts"] is None
+    assert line["state_after"] == line["state_before"]
+
+
+def test_input_after_the_fight_is_logged_as_fight_over(tmp_path):
+    config, session = _logged_session(tmp_path, [])
+    session["state"].outcome = "victory"
+
+    play("I attack again", session, FakeLLM([]), config)
+
+    [line] = _lines(session)
+    assert line["status"] == "fight_over"
+    assert line["raw_llm_outputs"] == {"intent": [], "narration": []}
+    assert line["reply"] == FIGHT_OVER_TEXT
+
+
+@pytest.mark.parametrize("text, guardrail", BLOCKED_INPUTS)
+def test_blocked_input_triggers_appear_in_the_log(tmp_path, text, guardrail):
+    config, session = _logged_session(tmp_path, [2])  # bite misses
+    play(text, session, FakeLLM(["You hesitate."]), config)
+
+    [line] = _lines(session)
+    assert line["status"] == "resolved"
+    assert line["intent_source"] == "guardrail"
+    assert line["parsed_action"] == {"action": "none", "target": "self"}
+    assert line["raw_llm_outputs"]["intent"] == []
+    assert guardrail in [t["guardrail"] for t in line["guardrail_triggers"]]
+
+
+def test_output_guardrail_triggers_appear_in_the_log(tmp_path):
+    config, session = _logged_session(tmp_path, [10, 4, 12, 5])
+    llm = FakeLLM([ATTACK, "Your blade deals 20 damage.", "Steel and fang both find their mark."])
+
+    play("I swing my sword at the drake", session, llm, config)
+
+    [line] = _lines(session)
+    assert {"guardrail": "GR-3", "rule": "number", "match": "20"} in line["guardrail_triggers"]
+    assert line["raw_llm_outputs"]["narration"] == [
+        "Your blade deals 20 damage.",
+        "Steel and fang both find their mark.",
+    ]
+    assert line["narration_source"] == "retry"
+
+
+def test_blank_input_writes_no_line(tmp_path):
+    config, session = _logged_session(tmp_path, [])
+    submit_turn("   ", [], session, FakeLLM([]), config)
+    assert not session["log_path"].exists()
+
+
+def test_restart_starts_a_new_log_file(tmp_path):
+    config = load_config()
+    *_, first = restart(config, log_dir=tmp_path)
+    *_, second = restart(config, log_dir=tmp_path)
+    assert first["log_path"].parent == tmp_path
+    assert first["log_path"] != second["log_path"]
+
+
+def _replay(config, log_dir):
+    """Play a fixed five-turn script from a fresh seeded session; return its log lines."""
+    session = new_session(config, log_dir=log_dir)
+    llm = FakeLLM(
+        [ATTACK, "Swing.", FIRE_BOLT, "Flame.", CURE_WOUNDS, "Light."]
+        + [DODGE, "Duck.", ATTACK, "Hit."]
+    )
+    for text in ["I attack", "Fire Bolt!", "I heal", "I dodge", "I attack"]:
+        play(text, session, llm, config)
+    return _lines(session)
+
+
+def test_same_seed_and_inputs_reproduce_the_same_dice_and_state(tmp_path):
+    config = load_config()
+
+    first = _replay(config, tmp_path / "a")
+    second = _replay(config, tmp_path / "b")
+
+    assert len(first) == len(second) == 5
+    for a, b in zip(first, second):
+        assert a["dice_rolls"] == b["dice_rolls"]
+        assert a["state_before"] == b["state_before"]
+        assert a["state_after"] == b["state_after"]
+
+
+def test_a_different_seed_rolls_different_dice(tmp_path):
+    config = load_config()
+    other = copy.deepcopy(config)
+    other["seed"] = config["seed"] + 1
+
+    first = _replay(config, tmp_path / "a")
+    second = _replay(other, tmp_path / "b")
+
+    assert [line["dice_rolls"] for line in first] != [line["dice_rolls"] for line in second]
