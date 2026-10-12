@@ -19,6 +19,7 @@ from mini_dm.engine import (
     initial_state,
     play_turn,
 )
+from mini_dm.guardrails import check_input
 from mini_dm.llm import client_from_config, request_narration, resolve_intent
 
 OPENING_SCENE = (
@@ -153,25 +154,31 @@ def new_session(config: dict) -> dict:
 
 
 def play(text: str, session: dict, client, config: dict) -> str:
-    """One turn: intent call -> engine (PC then boss) -> one narration call."""
+    """One turn: input guardrails -> intent call -> engine (PC then boss) -> one narration call."""
     state = session["state"]
     if state.outcome:
         return FIGHT_OVER_TEXT
 
-    resolution = resolve_intent(client, config, text)
-    intent = resolution.intent
-    if intent is None:
-        return SPELL_REFUSAL_TEXT if resolution.unknown_action else REPHRASE_TEXT
+    check = check_input(text, config["limits"]["input_max_chars"])
+    session["guardrail_triggers"] = check.triggers  # for the turn log (FR-11)
+    if check.blocked:
+        intent = {"action": "none", "target": "self"}  # forced none, no intent call (FR-8)
+    else:
+        resolution = resolve_intent(client, config, text)
+        intent = resolution.intent
+        if intent is None:
+            return SPELL_REFUSAL_TEXT if resolution.unknown_action else REPHRASE_TEXT
 
     results = play_turn(
         state, session["dice"], config["characters"], intent["action"], intent["target"]
     )
     facts = {"actions": [result.narration_facts() for result in results]}
-    if intent["action"] == "none":
+    if intent["action"] == "none" and not check.blocked:
         facts["actions"][0]["player_input"] = text  # so the narration can describe it (FR-8)
     if state.outcome:
         facts["outcome"] = state.outcome  # the closing narration (FR-10)
-    return f"{request_narration(client, config, facts)}\n\n{format_rolls(results)}"
+    reply = f"{request_narration(client, config, facts)}\n\n{format_rolls(results)}"
+    return f"{check.response}\n\n{reply}" if check.blocked else reply
 
 
 def submit_turn(text: str, history: list, session: dict, client, config: dict):
