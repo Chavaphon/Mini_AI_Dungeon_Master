@@ -30,17 +30,39 @@ _INJECTION_PATTERNS = tuple(
     )
 )
 
-# GR-5: off-topic requests, each with the noun the redirect names. Narrow on purpose,
-# so in-fiction phrasing like "I weather the flames" still reaches the intent call.
+# GR-5: off-topic requests, each with the noun the redirect names. The first matching
+# entry names the noun, so jokes come before code ("a joke about programmers"). Narrow
+# on purpose, so in-fiction phrasing still reaches the intent call: "I weather the
+# flames", "I tell the drake a joke", "I roll 1d8+3" (dice are not arithmetic).
 _OFF_TOPIC_PATTERNS = tuple(
     (noun, re.compile(pattern, re.IGNORECASE))
     for noun, pattern in (
         ("essay", r"\bessays?\b"),
-        ("homework", r"\bhomework\b"),
-        ("code", r"\b(python|javascript|sql|html|coding|source\s+code)\b"),
+        ("homework", r"\b(homework|assignments?|thesis)\b"),
+        (
+            "trivia",
+            r"\b(capital(\s+city)?|president|prime\s+minister|population)\s+of\b"
+            r"|\b(who|when)\s+(invented|discovered|painted)\b|\btrivia\b",
+        ),
+        (
+            "jokes",
+            r"\btell\s+(me|us)\s+(a|another|some|your)?\s*(funny\s+|good\s+)?jokes?\b"
+            r"|\b(know|got|have)\s+any\s+(good\s+)?jokes\b|\bknock[\s-]knock\b",
+        ),
+        (
+            "code",
+            r"\b(python|javascript|typescript|java|sql|html|coding|source\s+code|debug"
+            r"|my\s+code)\b"
+            r"|\bwrite\s+(me\s+)?(a|an|some)\s+(\w+\s+)?(program|function|script|class|app)\b",
+        ),
         ("recipe", r"\brecipes?\b"),
         ("weather", r"\bweather\s+(forecast|today|tomorrow|like|in)\b|\bforecast\b"),
-        ("math", r"\b(maths?|equations?|algebra|calculus)\b"),
+        (
+            "math",
+            r"\b(maths?|equations?|algebra|calculus)\b|\bsquare\s+root\b"
+            r"|(?<![\w.])\d+\s*([+*/×÷x]|times|plus|minus|divided\s+by|multiplied\s+by)"
+            r"\s*\d+\b",
+        ),
         ("email", r"\be-?mails?\b"),
         ("news", r"\b(headlines|latest\s+news|news\s+(today|about))\b"),
     )
