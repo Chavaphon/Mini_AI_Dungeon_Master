@@ -1,6 +1,36 @@
-"""Test doubles: scripted dice and a fake LLM client. Tests never call the real model."""
+"""Test doubles: scripted dice, a fake LLM client and pinned stats. Tests never call the real model."""
 
+import copy
+
+from mini_dm.config import load_config
 from mini_dm.engine import Dice, Roll, parse_dice
+
+# Fixed stats for rule tests, so tuning the stats in config.json (section 5) does not
+# change their expected numbers. test_config and test_state check config against section 5.
+RULES_CHARACTERS = {
+    "pc": {
+        "name": "Lyra",
+        "max_hp": 30,
+        "ac": 14,
+        "attack": {"name": "Short sword", "bonus": 5, "damage": "1d6+3"},
+        "fire_bolt": {"bonus": 5, "damage": "1d10"},
+        "cure_wounds": {"heal": "1d8+3", "uses": 2},
+    },
+    "boss": {
+        "name": "Ashfang",
+        "max_hp": 30,
+        "ac": 14,
+        "bite": {"bonus": 5, "damage": "1d8+2"},
+        "fire_breath": {"bonus": 5, "damage": "2d6", "trigger_hp_pct": 50},
+    },
+}
+
+
+def rules_config() -> dict:
+    """config.json with the character stats swapped for RULES_CHARACTERS."""
+    config = load_config()
+    config["characters"] = copy.deepcopy(RULES_CHARACTERS)
+    return config
 
 
 class ScriptedDice(Dice):

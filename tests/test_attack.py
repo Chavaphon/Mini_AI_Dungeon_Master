@@ -1,6 +1,5 @@
 import pytest
 
-from mini_dm.config import load_config
 from mini_dm.engine import (
     Combatant,
     Dice,
@@ -11,7 +10,7 @@ from mini_dm.engine import (
     resolve_attack,
     roll_damage,
 )
-from fakes import ScriptedDice
+from fakes import ScriptedDice, rules_config
 
 FACT_KEYS = {
     "actor",
@@ -33,11 +32,11 @@ def _pair():
 
 
 def _state():
-    return initial_state(load_config()["characters"])
+    return initial_state(rules_config()["characters"])
 
 
 def _characters():
-    return load_config()["characters"]
+    return rules_config()["characters"]
 
 
 # --- attack roll -----------------------------------------------------------

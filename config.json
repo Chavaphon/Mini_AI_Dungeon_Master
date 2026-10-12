@@ -21,6 +21,9 @@
     "input_max_chars": 300,
     "max_llm_calls_per_phase": 2
   },
+  "simulation": {
+    "fights": 1000
+  },
   "logging": {
     "dir": "logs"
   },
@@ -35,7 +38,7 @@
     },
     "boss": {
       "name": "Ashfang",
-      "max_hp": 30,
+      "max_hp": 22,
       "ac": 14,
       "bite": {"bonus": 5, "damage": "1d8+2"},
       "fire_breath": {"bonus": 5, "damage": "2d6", "trigger_hp_pct": 50}

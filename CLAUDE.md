@@ -39,6 +39,7 @@ mini_dm/
   guardrails.py    # input, output and integrity checks
   turnlog.py       # JSONL turn log (FR-11)
   app.py           # Gradio chat UI and status panel
+  simulate.py      # balance simulation, random PC policy, no LLM
   prompts/
     intent.txt
     narration.txt
@@ -57,6 +58,7 @@ py -3.14 -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
 .venv/Scripts/python -m pytest
 .venv/Scripts/python -m mini_dm.app   # run from repo root
+.venv/Scripts/python -m mini_dm.simulate   # balance report (1,000 fights)
 ollama pull llama3.1:8b
 ```
 
@@ -64,4 +66,5 @@ ollama pull llama3.1:8b
 
 - Engine unit tests cover the list in ProjectRequirements.md §11.
 - Guardrail tests use a **fake LLM client**. Tests must never call the real model.
+- Rule tests use the pinned stats in `tests/fakes.py` (`rules_config()`), so stat tuning does not break them. Only `test_config.py`, `test_state.py` and the balance guard in `test_simulate.py` read the tuned stats from `config.json`.
 - Every example input in the GR-1 to GR-8 table needs a test showing the expected behaviour.

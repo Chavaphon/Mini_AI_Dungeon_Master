@@ -1,16 +1,15 @@
 import pytest
 
-from mini_dm.config import load_config
 from mini_dm.engine import Dice, initial_state, play_turn, validate_intent
-from fakes import ScriptedDice
+from fakes import ScriptedDice, rules_config
 
 
 def _state():
-    return initial_state(load_config()["characters"])
+    return initial_state(rules_config()["characters"])
 
 
 def _characters():
-    return load_config()["characters"]
+    return rules_config()["characters"]
 
 
 def _turn(action, target, faces, state=None):

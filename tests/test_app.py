@@ -5,7 +5,7 @@ import gradio as gr
 import httpx
 import pytest
 
-from fakes import FakeLLM, ScriptedDice
+from fakes import FakeLLM, ScriptedDice, rules_config
 from mini_dm.app import (
     FIGHT_OVER_TEXT,
     OPENING_SCENE,
@@ -20,7 +20,6 @@ from mini_dm.app import (
     restart,
     submit_turn,
 )
-from mini_dm.config import load_config
 from mini_dm.engine import Dice, initial_state, play_turn
 from mini_dm.llm import LLMUnavailable, OllamaClient
 
@@ -30,7 +29,7 @@ def _components(demo, kind):
 
 
 def test_render_status_shows_initial_state():
-    status = render_status(initial_state(load_config()["characters"]))
+    status = render_status(initial_state(rules_config()["characters"]))
 
     assert "Lyra" in status and "Ashfang" in status
     assert status.count("30/30") == 2
@@ -41,7 +40,7 @@ def test_render_status_shows_initial_state():
 
 
 def test_render_status_reflects_changes():
-    state = initial_state(load_config()["characters"])
+    state = initial_state(rules_config()["characters"])
     state.pc.hp = 7
     state.cure_wounds_uses = 0
     state.round = 4
@@ -56,7 +55,7 @@ def test_render_status_reflects_changes():
 
 
 def test_build_ui_opens_with_opening_scene_and_status_panel():
-    demo = build_ui(load_config(), client=FakeLLM([]))
+    demo = build_ui(rules_config(), client=FakeLLM([]))
 
     assert isinstance(demo, gr.Blocks)
     [chatbot] = _components(demo, gr.Chatbot)
@@ -85,14 +84,14 @@ FACT_KEYS = {
 
 
 def _session(faces):
-    config = load_config()
+    config = rules_config()
     session = new_session(config)
     session["dice"] = ScriptedDice(faces)
     return config, session
 
 
 def test_new_session_has_initial_state_and_seeded_dice():
-    config = load_config()
+    config = rules_config()
     session = new_session(config)
     assert session["state"] == initial_state(config["characters"])
     assert session["dice"].roll("1d20") == Dice(config["seed"]).roll("1d20")
@@ -164,7 +163,7 @@ def test_submit_turn_ignores_blank_input():
 
 
 def test_build_ui_input_is_enabled():
-    demo = build_ui(load_config(), client=FakeLLM([]))
+    demo = build_ui(rules_config(), client=FakeLLM([]))
     [textbox] = _components(demo, gr.Textbox)
     assert textbox.interactive is True
 
@@ -643,12 +642,12 @@ def test_input_after_the_fight_ends_changes_nothing(outcome):
 
 
 def test_status_has_no_outcome_line_while_fighting():
-    assert "Outcome" not in render_status(initial_state(load_config()["characters"]))
+    assert "Outcome" not in render_status(initial_state(rules_config()["characters"]))
 
 
 @pytest.mark.parametrize("outcome", ["victory", "defeat"])
 def test_status_shows_outcome_once_the_fight_ends(outcome):
-    state = initial_state(load_config()["characters"])
+    state = initial_state(rules_config()["characters"])
     state.outcome = outcome
     assert f"Outcome: {outcome.capitalize()}" in render_status(state)
 
@@ -674,7 +673,7 @@ def test_restart_resets_everything_to_the_initial_state():
 
 
 def test_restart_lets_the_fight_continue():
-    config = load_config()
+    config = rules_config()
     _, _, _, session = restart(config)
     session["dice"] = ScriptedDice([2, 3])  # both miss
     llm = FakeLLM([ATTACK, "Again."])
@@ -685,7 +684,7 @@ def test_restart_lets_the_fight_continue():
 
 
 def test_build_ui_has_a_restart_button():
-    demo = build_ui(load_config(), client=FakeLLM([]))
+    demo = build_ui(rules_config(), client=FakeLLM([]))
     assert [b.value for b in _components(demo, gr.Button)] == ["Restart"]
 
 
@@ -836,7 +835,7 @@ def test_ollama_down_or_timing_out_gives_safe_message_and_no_turn(error):
     def handler(request):
         raise error("Ollama is down", request=request)
 
-    config = load_config()
+    config = rules_config()
     ollama = config["ollama"]
     client = OllamaClient(
         ollama["host"], ollama["model"], ollama["timeout_s"],
@@ -852,7 +851,7 @@ def test_ollama_down_or_timing_out_gives_safe_message_and_no_turn(error):
 
 
 def test_narration_failure_rolls_the_turn_back():
-    config = load_config()
+    config = rules_config()
     session = new_session(config)
     llm = FakeLLM([ATTACK, LLMUnavailable("timed out")])
 
@@ -864,7 +863,7 @@ def test_narration_failure_rolls_the_turn_back():
 
 
 def test_turn_after_rollback_rolls_the_same_dice_as_a_fresh_session():
-    config = load_config()
+    config = rules_config()
     session = new_session(config)
     play("attack", session, FakeLLM([ATTACK, LLMUnavailable("down")]), config)
 
@@ -907,7 +906,7 @@ FR11_KEYS = {
 
 
 def _logged_session(tmp_path, faces=None):
-    config = load_config()
+    config = rules_config()
     session = new_session(config, log_dir=tmp_path)
     if faces is not None:
         session["dice"] = ScriptedDice(faces)
@@ -920,7 +919,7 @@ def _lines(session):
 
 
 def test_new_session_without_a_log_dir_does_not_log():
-    assert new_session(load_config())["log_path"] is None
+    assert new_session(rules_config())["log_path"] is None
 
 
 def test_resolved_turn_writes_one_line_with_every_fr11_field(tmp_path):
@@ -1063,7 +1062,7 @@ def test_blank_input_writes_no_line(tmp_path):
 
 
 def test_restart_starts_a_new_log_file(tmp_path):
-    config = load_config()
+    config = rules_config()
     *_, first = restart(config, log_dir=tmp_path)
     *_, second = restart(config, log_dir=tmp_path)
     assert first["log_path"].parent == tmp_path
@@ -1083,7 +1082,7 @@ def _replay(config, log_dir):
 
 
 def test_same_seed_and_inputs_reproduce_the_same_dice_and_state(tmp_path):
-    config = load_config()
+    config = rules_config()
 
     first = _replay(config, tmp_path / "a")
     second = _replay(config, tmp_path / "b")
@@ -1096,7 +1095,7 @@ def test_same_seed_and_inputs_reproduce_the_same_dice_and_state(tmp_path):
 
 
 def test_a_different_seed_rolls_different_dice(tmp_path):
-    config = load_config()
+    config = rules_config()
     other = copy.deepcopy(config)
     other["seed"] = config["seed"] + 1
 
