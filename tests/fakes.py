@@ -22,13 +22,19 @@ class ScriptedDice(Dice):
             rolls.append(face)
         return Roll(notation, tuple(rolls), spec.modifier, sum(rolls) + spec.modifier)
 
+    def getstate(self):
+        return list(self._faces)
+
+    def setstate(self, state) -> None:
+        self._faces = list(state)
+
     @property
     def remaining(self) -> int:
         return len(self._faces)
 
 
 class FakeLLM:
-    """Records every chat call and returns queued replies in order."""
+    """Records every chat call and returns queued replies in order. A queued exception is raised."""
 
     def __init__(self, replies):
         self._replies = list(replies)
@@ -45,4 +51,7 @@ class FakeLLM:
         )
         if not self._replies:
             raise AssertionError("FakeLLM got more calls than queued replies")
-        return self._replies.pop(0)
+        reply = self._replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply

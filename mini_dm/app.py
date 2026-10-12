@@ -18,9 +18,11 @@ from mini_dm.engine import (
     hp_band,
     initial_state,
     play_turn,
+    restore,
+    snapshot,
 )
 from mini_dm.guardrails import check_input
-from mini_dm.llm import client_from_config, narrate, resolve_intent
+from mini_dm.llm import LLMUnavailable, client_from_config, narrate, resolve_intent
 
 OPENING_SCENE = (
     "Wind howls through the broken crown of the old watchtower. Charred beams and "
@@ -41,6 +43,9 @@ SPELL_REFUSAL_TEXT = (
     "Cure Wounds. What do you do, Lyra? Strike with your sword, hurl a Fire Bolt, "
     "cast Cure Wounds, dodge, or say something to the drake."
 )
+
+# GR-9: Ollama is down, timed out or errored. The turn does not advance.
+UNAVAILABLE_TEXT = "The mists swirl… (the model is unavailable)"
 
 # Fixed reply once the fight has ended: no model call, no state change.
 FIGHT_OVER_TEXT = (
@@ -165,11 +170,15 @@ def play(text: str, session: dict, client, config: dict) -> str:
     if check.blocked:
         intent = {"action": "none", "target": "self"}  # forced none, no intent call (FR-8)
     else:
-        resolution = resolve_intent(client, config, text)
+        try:
+            resolution = resolve_intent(client, config, text)
+        except LLMUnavailable:
+            return UNAVAILABLE_TEXT  # nothing has changed yet (GR-9)
         intent = resolution.intent
         if intent is None:
             return SPELL_REFUSAL_TEXT if resolution.unknown_action else REPHRASE_TEXT
 
+    saved = snapshot(state, session["dice"])
     results = play_turn(
         state, session["dice"], config["characters"], intent["action"], intent["target"]
     )
@@ -178,7 +187,12 @@ def play(text: str, session: dict, client, config: dict) -> str:
         facts["actions"][0]["player_input"] = text  # so the narration can describe it (FR-8)
     if state.outcome:
         facts["outcome"] = state.outcome  # the closing narration (FR-10)
-    narration = narrate(client, config, facts)  # output guardrails, then the template (GR-3/7/8)
+    # Output guardrails, then the template (GR-3/7/8).
+    try:
+        narration = narrate(client, config, facts)
+    except LLMUnavailable:
+        restore(state, session["dice"], saved)  # no turn without its narration (GR-9)
+        return UNAVAILABLE_TEXT
     session["guardrail_triggers"] = check.triggers + narration.triggers
     reply = f"{narration.text}\n\n{format_rolls(results)}"
     return f"{check.response}\n\n{reply}" if check.blocked else reply

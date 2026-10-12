@@ -4,9 +4,10 @@ The engine owns all game state and has no LLM dependency. Every die roll
 comes from the single seeded random.Random instance held by Dice.
 """
 
+import copy
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 
 _DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 
@@ -56,6 +57,12 @@ class Dice:
         rolls = tuple(self._rng.randint(1, spec.sides) for _ in range(spec.count))
         return Roll(notation, rolls, spec.modifier, sum(rolls) + spec.modifier)
 
+    def getstate(self):
+        return self._rng.getstate()
+
+    def setstate(self, state) -> None:
+        self._rng.setstate(state)
+
 
 @dataclass
 class Combatant:
@@ -84,6 +91,25 @@ def initial_state(characters: dict) -> FightState:
         boss=Combatant(boss["name"], boss["max_hp"], boss["max_hp"], boss["ac"]),
         cure_wounds_uses=pc["cure_wounds"]["uses"],
     )
+
+
+@dataclass(frozen=True)
+class TurnSnapshot:
+    state: FightState
+    dice_state: object
+
+
+def snapshot(state: FightState, dice: Dice) -> TurnSnapshot:
+    """Save the fight state and dice position, so a turn can be undone if narration fails."""
+    return TurnSnapshot(copy.deepcopy(state), dice.getstate())
+
+
+def restore(state: FightState, dice: Dice, saved: TurnSnapshot) -> None:
+    """Put `state` (in place) and the dice back to how they were when `saved` was taken."""
+    saved_state = copy.deepcopy(saved.state)
+    for field in fields(FightState):
+        setattr(state, field.name, getattr(saved_state, field.name))
+    dice.setstate(saved.dice_state)
 
 
 def hp_band(hp: int, max_hp: int) -> str:
