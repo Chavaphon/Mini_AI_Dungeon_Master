@@ -68,3 +68,14 @@ def test_no_direct_random_module_calls():
             ):
                 offenders.append(f"{path.name}:{node.lineno}: random.{node.attr}")
     assert offenders == []
+
+
+def test_setstate_replays_the_same_rolls():
+    dice = Dice(seed=42)
+    dice.roll("1d20")
+    saved = dice.getstate()
+    first = [dice.roll("1d20").total for _ in range(5)]
+
+    dice.setstate(saved)
+
+    assert [dice.roll("1d20").total for _ in range(5)] == first

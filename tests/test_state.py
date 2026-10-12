@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from mini_dm.config import load_config
-from mini_dm.engine import hp_band, initial_state
+from mini_dm.engine import Dice, hp_band, initial_state, play_turn, restore, snapshot
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -65,3 +65,31 @@ def test_engine_imports_without_llm_or_ui_dependencies():
         [sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_restore_undoes_a_turn_in_place():
+    characters = load_config()["characters"]
+    state, dice = initial_state(characters), Dice(seed=42)
+    state.boss.hp = 15  # Fire Breath is due, so the turn also spends it
+    saved = snapshot(state, dice)
+    before = repr(state)
+    first = play_turn(state, dice, characters, "dodge")
+    assert repr(state) != before
+
+    restore(state, dice, saved)
+
+    assert repr(state) == before
+    assert play_turn(state, dice, characters, "dodge") == first  # same dice again (FR-12)
+
+
+def test_snapshot_is_not_changed_by_the_turn():
+    characters = load_config()["characters"]
+    state, dice = initial_state(characters), Dice(seed=42)
+    saved = snapshot(state, dice)
+    play_turn(state, dice, characters, "attack")
+    restore(state, dice, saved)
+    play_turn(state, dice, characters, "attack")
+
+    restore(state, dice, saved)
+
+    assert repr(state) == repr(initial_state(characters))

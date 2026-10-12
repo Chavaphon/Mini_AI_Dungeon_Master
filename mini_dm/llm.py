@@ -25,6 +25,10 @@ _FALLBACK_KEYWORDS = (
 )
 
 
+class LLMUnavailable(Exception):
+    """Ollama is down, timed out or sent back something unusable (GR-9)."""
+
+
 class OllamaClient:
     """Minimal client for a local Ollama server's /api/chat endpoint."""
 
@@ -50,6 +54,7 @@ class OllamaClient:
         return True
 
     def chat(self, messages, *, temperature, num_predict, json_mode=False) -> str:
+        """One chat call, bounded by the config timeout. Raises LLMUnavailable on any failure."""
         body = {
             "model": self.model,
             "messages": messages,
@@ -60,9 +65,12 @@ class OllamaClient:
             body["format"] = "json"
         if self.keep_alive is not None:
             body["keep_alive"] = self.keep_alive
-        response = self._http.post("/api/chat", json=body)
-        response.raise_for_status()
-        return response.json()["message"]["content"]
+        try:
+            response = self._http.post("/api/chat", json=body)
+            response.raise_for_status()
+            return response.json()["message"]["content"]
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as err:
+            raise LLMUnavailable(str(err)) from err
 
 
 def client_from_config(config: dict) -> OllamaClient:
@@ -143,6 +151,7 @@ def resolve_intent(client, config: dict, text: str) -> IntentResolution:
     """Intent call, validated by the engine, with one retry and then the keyword fallback.
 
     At most `max_llm_calls_per_phase` calls (GR-9). The model's reply is only a proposal.
+    LLMUnavailable is not retried: it propagates to the caller at once.
     """
     resolution = IntentResolution(intent=None)
     retry = None
@@ -216,6 +225,7 @@ def narrate(client, config: dict, facts: dict) -> NarrationResult:
     """Narration call checked by GR-3, GR-7 and GR-8, with one shared regeneration.
 
     At most `max_llm_calls_per_phase` calls (GR-9); if every reply fails, the safe template.
+    LLMUnavailable is not retried: it propagates to the caller at once.
     """
     result = NarrationResult(text="")
     narration = config["narration"]

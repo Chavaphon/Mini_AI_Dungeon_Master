@@ -5,6 +5,7 @@ import pytest
 
 from mini_dm.config import load_config
 from mini_dm.llm import (
+    LLMUnavailable,
     OllamaClient,
     client_from_config,
     fallback_intent,
@@ -83,6 +84,55 @@ def test_client_from_config_reads_ollama_section():
         config["timeout_s"],
         config["keep_alive"],
     )
+
+
+def _failing_client(handler):
+    config = load_config()["ollama"]
+    return OllamaClient(
+        config["host"], config["model"], config["timeout_s"],
+        transport=httpx.MockTransport(handler),
+    )
+
+
+def _raise(error):
+    def handler(request):
+        raise error("Ollama is down", request=request)
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [
+        _raise(httpx.ConnectError),
+        _raise(httpx.ReadTimeout),
+        lambda request: httpx.Response(500, text="model crashed"),
+        lambda request: httpx.Response(200, json={"error": "no message"}),
+        lambda request: httpx.Response(200, text="not json"),
+    ],
+    ids=["connection-error", "timeout", "http-500", "no-message", "not-json"],
+)
+def test_chat_raises_llm_unavailable_when_ollama_fails(handler):
+    with pytest.raises(LLMUnavailable):
+        _failing_client(handler).chat([], temperature=0, num_predict=1)
+
+
+def test_resolve_intent_does_not_retry_when_ollama_is_unavailable():
+    llm = FakeLLM([LLMUnavailable("down"), '{"action": "attack", "target": "ashfang"}'])
+
+    with pytest.raises(LLMUnavailable):
+        resolve_intent(llm, load_config(), "I swing my sword")
+
+    assert len(llm.calls) == 1  # a timeout must not cost a second wait (GR-9)
+
+
+def test_narrate_does_not_retry_when_ollama_is_unavailable():
+    llm = FakeLLM([LLMUnavailable("down"), "Lyra strikes."])
+
+    with pytest.raises(LLMUnavailable):
+        narrate(llm, load_config(), {"actions": []})
+
+    assert len(llm.calls) == 1
 
 
 # --- warm-up -----------------------------------------------------------------

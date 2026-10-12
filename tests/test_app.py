@@ -2,6 +2,7 @@ import copy
 import json
 
 import gradio as gr
+import httpx
 import pytest
 
 from fakes import FakeLLM, ScriptedDice
@@ -10,6 +11,7 @@ from mini_dm.app import (
     OPENING_SCENE,
     REPHRASE_TEXT,
     SPELL_REFUSAL_TEXT,
+    UNAVAILABLE_TEXT,
     build_ui,
     format_rolls,
     new_session,
@@ -20,6 +22,7 @@ from mini_dm.app import (
 )
 from mini_dm.config import load_config
 from mini_dm.engine import Dice, initial_state, play_turn
+from mini_dm.llm import LLMUnavailable, OllamaClient
 
 
 def _components(demo, kind):
@@ -818,3 +821,70 @@ def test_output_triggers_follow_input_triggers():
         ("GR-7", "meta"),
     ]
     assert reply.split("\n\n")[1] == "You hesitate."
+
+
+# --- Ollama unavailable (GR-9) ------------------------------------------------
+
+
+def test_unavailable_text_matches_gr9():
+    assert UNAVAILABLE_TEXT == "The mists swirl… (the model is unavailable)"
+
+
+@pytest.mark.parametrize("error", [httpx.ConnectError, httpx.ReadTimeout])
+def test_ollama_down_or_timing_out_gives_safe_message_and_no_turn(error):
+    def handler(request):
+        raise error("Ollama is down", request=request)
+
+    config = load_config()
+    ollama = config["ollama"]
+    client = OllamaClient(
+        ollama["host"], ollama["model"], ollama["timeout_s"],
+        transport=httpx.MockTransport(handler),
+    )
+    session = new_session(config)
+
+    reply = play("I swing my sword at the drake", session, client, config)
+
+    assert reply == UNAVAILABLE_TEXT
+    assert session["state"] == initial_state(config["characters"])
+    assert session["dice"].roll("1d20") == Dice(config["seed"]).roll("1d20")  # no dice spent
+
+
+def test_narration_failure_rolls_the_turn_back():
+    config = load_config()
+    session = new_session(config)
+    llm = FakeLLM([ATTACK, LLMUnavailable("timed out")])
+
+    reply = play("I swing my sword at the drake", session, llm, config)
+
+    assert reply == UNAVAILABLE_TEXT
+    assert len(llm.calls) == 2  # no narration retry after a timeout
+    assert session["state"] == initial_state(config["characters"])
+
+
+def test_turn_after_rollback_rolls_the_same_dice_as_a_fresh_session():
+    config = load_config()
+    session = new_session(config)
+    play("attack", session, FakeLLM([ATTACK, LLMUnavailable("down")]), config)
+
+    retried = play("attack", session, FakeLLM([ATTACK, "Steel meets scale."]), config)
+    fresh_session = new_session(config)
+    fresh = play("attack", fresh_session, FakeLLM([ATTACK, "Steel meets scale."]), config)
+
+    assert retried == fresh
+    assert session["state"] == fresh_session["state"]
+
+
+def test_submit_turn_shows_safe_message_when_ollama_is_down():
+    config, session = _session([])
+    llm = FakeLLM([LLMUnavailable("connection refused")])
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+
+    textbox, history, status = submit_turn("I attack", history, session, llm, config)
+
+    assert textbox == ""
+    assert history[-2:] == [
+        {"role": "user", "content": "I attack"},
+        {"role": "assistant", "content": UNAVAILABLE_TEXT},
+    ]
+    assert status.count("30/30") == 2 and "Round: 1" in status
