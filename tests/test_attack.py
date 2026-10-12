@@ -212,9 +212,9 @@ def test_pc_at_zero_hp_is_defeat():
     assert state.outcome == "defeat"
 
 
-def test_play_turn_rejects_unbuilt_actions():
+def test_play_turn_rejects_unknown_actions():
     with pytest.raises(ValueError):
-        play_turn(_state(), ScriptedDice([]), _characters(), "none")
+        play_turn(_state(), ScriptedDice([]), _characters(), "meteor_swarm")
 
 
 def test_same_seed_and_actions_give_same_state():

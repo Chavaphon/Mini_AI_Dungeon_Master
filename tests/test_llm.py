@@ -199,9 +199,19 @@ def test_intent_maps_fire_bolt_text():
     assert intent == {"action": "fire_bolt", "target": "ashfang"}
 
 
+def test_intent_maps_taunt_to_none():
+    llm = FakeLLM(['{"action": "none", "target": ""}'])
+
+    _raw, intent = request_intent(llm, load_config(), "I taunt the drake")
+
+    assert llm.calls[0]["messages"][-1]["content"] == "I taunt the drake"
+    assert intent == {"action": "none", "target": ""}
+
+
 def test_narration_prompt_names_each_action():
     prompt = load_prompt("narration")
     for name in (
+        '"none"',
         '"attack"',
         '"fire_bolt"',
         "Fire Bolt",
@@ -218,3 +228,9 @@ def test_narration_prompt_explains_cure_wounds_facts():
     prompt = load_prompt("narration")
     for field in ('"success"', '"healing"', '"uses_left"'):
         assert field in prompt
+
+
+def test_narration_prompt_explains_none_facts():
+    prompt = load_prompt("narration")
+    assert '"player_input"' in prompt
+    assert "taunt" in prompt
