@@ -6,6 +6,7 @@ import pytest
 
 from mini_dm.config import load_config
 from mini_dm.engine import Dice, hp_band, initial_state, play_turn, restore, snapshot
+from fakes import rules_config
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -18,7 +19,7 @@ def test_initial_state_matches_section_5():
     assert state.cure_wounds_uses == 2
 
     assert state.boss.name == "Ashfang"
-    assert (state.boss.hp, state.boss.max_hp, state.boss.ac) == (30, 30, 14)
+    assert (state.boss.hp, state.boss.max_hp, state.boss.ac) == (22, 22, 14)
     assert state.fire_breath_used is False
 
     assert state.round == 1
@@ -27,7 +28,7 @@ def test_initial_state_matches_section_5():
 
 
 def test_initial_state_uses_given_stats():
-    characters = load_config()["characters"]
+    characters = rules_config()["characters"]
     characters["pc"]["max_hp"] = 40
     characters["pc"]["cure_wounds"]["uses"] = 3
     characters["boss"]["ac"] = 12
@@ -68,7 +69,7 @@ def test_engine_imports_without_llm_or_ui_dependencies():
 
 
 def test_restore_undoes_a_turn_in_place():
-    characters = load_config()["characters"]
+    characters = rules_config()["characters"]
     state, dice = initial_state(characters), Dice(seed=42)
     state.boss.hp = 15  # Fire Breath is due, so the turn also spends it
     saved = snapshot(state, dice)
@@ -83,7 +84,7 @@ def test_restore_undoes_a_turn_in_place():
 
 
 def test_snapshot_is_not_changed_by_the_turn():
-    characters = load_config()["characters"]
+    characters = rules_config()["characters"]
     state, dice = initial_state(characters), Dice(seed=42)
     saved = snapshot(state, dice)
     play_turn(state, dice, characters, "attack")

@@ -1,10 +1,9 @@
-from mini_dm.config import load_config
 from mini_dm.engine import Dice, choose_boss_action, initial_state, play_turn
-from fakes import ScriptedDice
+from fakes import ScriptedDice, rules_config
 
 
 def _characters():
-    return load_config()["characters"]
+    return rules_config()["characters"]
 
 
 def _state(boss_hp=30):

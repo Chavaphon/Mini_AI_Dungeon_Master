@@ -24,12 +24,15 @@ def test_config_has_required_values():
     }
     assert config["limits"] == {"input_max_chars": 300, "max_llm_calls_per_phase": 2}
     assert config["logging"] == {"dir": "logs"}
+    assert config["simulation"] == {"fights": 1000}
 
 
 def test_config_character_stats_match_section_5():
     pc = load_config()["characters"]["pc"]
     boss = load_config()["characters"]["boss"]
 
+    assert (pc["max_hp"], pc["ac"]) == (30, 14)
+    assert (boss["max_hp"], boss["ac"]) == (22, 14)
     assert pc["attack"] == {"name": "Short sword", "bonus": 5, "damage": "1d6+3"}
     assert pc["fire_bolt"] == {"bonus": 5, "damage": "1d10"}
     assert pc["cure_wounds"] == {"heal": "1d8+3", "uses": 2}

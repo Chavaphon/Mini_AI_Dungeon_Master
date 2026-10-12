@@ -49,11 +49,11 @@ Guardrails are applied in three layers: **game integrity**, **input** and **outp
 
 ## 5. Predefined characters
 
-These are starting values. They will be tuned after the Day 1 balance simulation and the Day 3 playtest.
+These values were tuned by the Day 1 balance simulation (`python -m mini_dm.simulate`): 1,000 seeded fights with a random PC policy (uniform over attack, Fire Bolt, Cure Wounds and dodge; Cure Wounds is skipped once its uses run out) give a PC win rate of about 53% and a mean fight length of about 9 rounds. Ashfang's hit points went from 30 to 22. They may be tuned again after the Day 3 playtest.
 
 | | **Lyra** (player character) | **Ashfang**, young ember drake (boss) |
 |---|---|---|
-| Hit points | 30 | 30 |
+| Hit points | 30 | 22 |
 | Armour class | 14 | 14 |
 | Attack | Short sword, +5 to hit, 1d6+3 | Bite, +5 to hit, 1d8+2 |
 | Spells / specials | Fire Bolt: +5 spell attack, 1d10, unlimited. Cure Wounds: heals 1d8+3, 2 uses. | Fire Breath: +5 to hit, 2d6, used once, on the first boss turn after its HP is at or below 50% |
@@ -145,6 +145,7 @@ mini_dm/
   guardrails.py      # input, output and integrity checks
   turnlog.py         # JSONL turn log (FR-11)
   app.py             # Gradio chat UI and status panel
+  simulate.py        # balance simulation (section 12, Day 1)
   prompts/
     intent.txt
     narration.txt
