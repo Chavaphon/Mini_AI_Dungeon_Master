@@ -234,6 +234,9 @@ def _play(text: str, session: dict, client, config: dict, record: dict) -> str:
                 return SPELL_REFUSAL_TEXT
             record["status"] = "refused_rephrase"
             return REPHRASE_TEXT
+        if intent["action"] == "none" and names_missing_item(text):
+            record["status"] = "refused_item"  # an item mapped to none (FR-8)
+            return ITEM_REFUSAL_TEXT
     record["parsed_action"] = intent
 
     saved = snapshot(state, session["dice"])
