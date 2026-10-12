@@ -14,6 +14,9 @@ _DICE_RE = re.compile(r"^(\d+)d(\d+)([+-]\d+)?$")
 PC_ATTACKS = ("attack", "fire_bolt")
 # Every PC action the engine can resolve in this build.
 PC_ACTIONS = PC_ATTACKS + ("cure_wounds", "dodge", "none")
+# The target allow-list (GR-2) and the correct target per action. Dodge and none ignore targets.
+TARGETS = ("ashfang", "self")
+CORRECT_TARGET = {"attack": "ashfang", "fire_bolt": "ashfang", "cure_wounds": "self"}
 
 
 @dataclass(frozen=True)
@@ -217,26 +220,31 @@ class HealResult:
         }
 
 
-def resolve_cure_wounds(dice: Dice, state: FightState, heal: str) -> HealResult:
-    """Spend one use and heal the PC, capped at max HP. With no uses left the cast fails."""
-    pc = state.pc
-    hp_before = pc.hp
+def resolve_cure_wounds(
+    dice: Dice, state: FightState, heal: str, target: Combatant | None = None
+) -> HealResult:
+    """Spend one use and heal the target (the PC by default), capped at max HP.
+
+    With no uses left the cast fails.
+    """
+    target = target or state.pc
+    hp_before = target.hp
     heal_roll = None
     if state.cure_wounds_uses > 0:
         state.cure_wounds_uses -= 1
         heal_roll = dice.roll(heal)
-        apply_damage(pc, -heal_roll.total)
+        apply_damage(target, -heal_roll.total)
 
     return HealResult(
-        actor=pc.name,
+        actor=state.pc.name,
         action="cure_wounds",
-        target=pc.name,
+        target=target.name,
         success=heal_roll is not None,
-        healing=pc.hp - hp_before,
+        healing=target.hp - hp_before,
         target_hp_before=hp_before,
-        target_hp_after=pc.hp,
-        target_max_hp=pc.max_hp,
-        target_hp_band=hp_band(pc.hp, pc.max_hp),
+        target_hp_after=target.hp,
+        target_max_hp=target.max_hp,
+        target_hp_band=hp_band(target.hp, target.max_hp),
         uses_left=state.cure_wounds_uses,
         heal_roll=heal_roll,
     )
@@ -285,30 +293,57 @@ def choose_boss_action(state: FightState, trigger_hp_pct: int) -> str:
 TurnResult = ActionResult | HealResult | DodgeResult | NoActionResult
 
 
-def _resolve_pc_action(state: FightState, dice: Dice, characters: dict, action: str) -> TurnResult:
+def validate_intent(action: str, target: str) -> str | None:
+    """Check a proposed action against the allow-list (GR-2). Returns the reason it is invalid.
+
+    An allowed target on the wrong action is valid: it resolves against that combatant.
+    """
+    if action not in PC_ACTIONS:
+        return (
+            f"{action!r} is not one of Lyra's actions. Lyra knows only the spells Fire Bolt "
+            f"and Cure Wounds. The actions are: {', '.join(PC_ACTIONS)}."
+        )
+    if action in CORRECT_TARGET and target not in TARGETS:
+        return f"{target!r} is not a valid target. The targets are: {', '.join(TARGETS)}."
+    return None
+
+
+def _resolve_pc_action(
+    state: FightState, dice: Dice, characters: dict, action: str, target: str | None
+) -> TurnResult:
     if action == "none":
         return resolve_no_action(state)
     if action == "dodge":
         return resolve_dodge(state)
+    if action not in CORRECT_TARGET:
+        raise ValueError(f"Unknown action: {action!r}")
+    # A wrong target is not refused: the action resolves against that combatant.
+    combatant = state.pc if (target or CORRECT_TARGET[action]) == "self" else state.boss
     if action == "cure_wounds":
-        return resolve_cure_wounds(dice, state, characters["pc"]["cure_wounds"]["heal"])
-    if action in PC_ATTACKS:
-        # Sword and Fire Bolt share the attack rules; Fire Bolt has no uses to spend.
-        pc_attack = characters["pc"][action]
-        return resolve_attack(
-            dice, state.pc, state.boss, action, pc_attack["bonus"], pc_attack["damage"]
-        )
-    raise ValueError(f"Unknown action: {action!r}")
+        return resolve_cure_wounds(dice, state, characters["pc"]["cure_wounds"]["heal"], combatant)
+    # Sword and Fire Bolt share the attack rules; Fire Bolt has no uses to spend.
+    pc_attack = characters["pc"][action]
+    return resolve_attack(
+        dice, state.pc, combatant, action, pc_attack["bonus"], pc_attack["damage"]
+    )
 
 
-def play_turn(state: FightState, dice: Dice, characters: dict, action: str) -> list[TurnResult]:
-    """PC acts, then the boss acts unless the fight has ended. The round advances after the boss."""
+def play_turn(
+    state: FightState, dice: Dice, characters: dict, action: str, target: str | None = None
+) -> list[TurnResult]:
+    """PC acts, then the boss acts unless the fight has ended. The round advances after the boss.
+
+    `target` is "ashfang" or "self"; None means the action's correct target.
+    """
     if state.outcome:
         raise ValueError(f"The fight is over: {state.outcome}")
     state.pc_dodging = False  # a dodge ends at the start of the dodger's next turn
-    results = [_resolve_pc_action(state, dice, characters, action)]
+    results = [_resolve_pc_action(state, dice, characters, action, target)]
     if state.boss.hp == 0:
         state.outcome = "victory"
+        return results
+    if state.pc.hp == 0:  # Lyra struck herself down
+        state.outcome = "defeat"
         return results
 
     boss = characters["boss"]

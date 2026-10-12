@@ -13,14 +13,13 @@ from mini_dm.engine import (
     FightState,
     HealResult,
     NoActionResult,
-    PC_ACTIONS,
     Roll,
     TurnResult,
     hp_band,
     initial_state,
     play_turn,
 )
-from mini_dm.llm import client_from_config, request_intent, request_narration
+from mini_dm.llm import client_from_config, request_narration, resolve_intent
 
 OPENING_SCENE = (
     "Wind howls through the broken crown of the old watchtower. Charred beams and "
@@ -29,12 +28,17 @@ OPENING_SCENE = (
     "and fixes its gaze on you, Lyra. What do you do?"
 )
 
-# Reply when the intent cannot be read; the turn does not advance.
-# Placeholder until the FR-4 retry and fallback parser land (#11).
+# FR-4 refusals once the retry and the fallback parser have failed; the turn does not advance.
 REPHRASE_TEXT = (
     "Ashfang's roar drowns out your thoughts for a moment. What do you do, Lyra? "
     "Strike with your sword, hurl a Fire Bolt, cast Cure Wounds, dodge, or say "
     "something to the drake."
+)
+# When the model proposed an action or spell that is not on the allow-list (GR-2).
+SPELL_REFUSAL_TEXT = (
+    "The words of an unfamiliar spell die on your lips. You know only Fire Bolt and "
+    "Cure Wounds. What do you do, Lyra? Strike with your sword, hurl a Fire Bolt, "
+    "cast Cure Wounds, dodge, or say something to the drake."
 )
 
 # Fixed reply once the fight has ended: no model call, no state change.
@@ -93,13 +97,18 @@ def _dice_text(roll: Roll, unit: str) -> str:
     return f"{roll.notation}: {expression} = {roll.total} {unit}"
 
 
+def _heal_label(result: HealResult) -> str:
+    """Names the target only when it is the wrong one (FR-13)."""
+    return "Cure Wounds" if result.target == result.actor else f"Cure Wounds on {result.target}"
+
+
 def _heal_line(result: HealResult) -> str:
     if not result.heal_roll:
-        return f"🎲 {result.actor}, Cure Wounds: no uses left"
+        return f"🎲 {result.actor}, {_heal_label(result)}: no uses left"
     text = _dice_text(result.heal_roll, "healing")
     if result.heal_roll.total > result.healing:
         text += f" (capped at {result.target_max_hp})"
-    return f"🎲 {result.actor}, Cure Wounds: {text}"
+    return f"🎲 {result.actor}, {_heal_label(result)}: {text}"
 
 
 def _attack_text(result: ActionResult) -> str:
@@ -128,6 +137,8 @@ def _roll_line(result: TurnResult) -> str:
     if result.damage_roll:
         outcome += f", {_dice_text(result.damage_roll, 'damage')}"
     label = _ACTION_LABELS.get(result.action, result.action.replace("_", " "))
+    if result.target == result.actor:  # Lyra struck herself: name the wrong target (FR-13)
+        label += f" at {result.target}"
     return f"🎲 {result.actor}, {label}: {attack} vs AC {result.target_ac} → {outcome}"
 
 
@@ -147,11 +158,14 @@ def play(text: str, session: dict, client, config: dict) -> str:
     if state.outcome:
         return FIGHT_OVER_TEXT
 
-    _raw, intent = request_intent(client, config, text)
-    if intent is None or intent["action"] not in PC_ACTIONS:
-        return REPHRASE_TEXT
+    resolution = resolve_intent(client, config, text)
+    intent = resolution.intent
+    if intent is None:
+        return SPELL_REFUSAL_TEXT if resolution.unknown_action else REPHRASE_TEXT
 
-    results = play_turn(state, session["dice"], config["characters"], intent["action"])
+    results = play_turn(
+        state, session["dice"], config["characters"], intent["action"], intent["target"]
+    )
     facts = {"actions": [result.narration_facts() for result in results]}
     if intent["action"] == "none":
         facts["actions"][0]["player_input"] = text  # so the narration can describe it (FR-8)

@@ -9,6 +9,7 @@ from mini_dm.app import (
     FIGHT_OVER_TEXT,
     OPENING_SCENE,
     REPHRASE_TEXT,
+    SPELL_REFUSAL_TEXT,
     build_ui,
     format_rolls,
     new_session,
@@ -125,12 +126,12 @@ def test_narration_gets_both_actions_as_facts_only():
 
 def test_unparseable_intent_asks_to_rephrase_and_turn_does_not_advance():
     config, session = _session([])
-    llm = FakeLLM(["not json"])
+    llm = FakeLLM(["not json", "still not json"])
 
-    reply = play("I dive aside", session, llm, config)
+    reply = play("I mutter something", session, llm, config)
 
     assert reply == REPHRASE_TEXT
-    assert len(llm.calls) == 1
+    assert len(llm.calls) == 2
     assert session["state"] == initial_state(config["characters"])
 
 
@@ -214,9 +215,118 @@ def test_play_appends_rolls_after_narration_and_keeps_them_from_the_model():
 
 def test_rephrase_reply_has_no_rolls():
     config, session = _session([])
-    llm = FakeLLM(["not json"])
+    llm = FakeLLM(["not json", "not json"])
     reply = play("I look around", session, llm, config)
     assert "🎲" not in reply
+
+
+# --- validation, retry and fallback (FR-4, GR-1, GR-2) -------------------------
+
+
+def test_gr1_kill_instantly_is_an_ordinary_rolled_attack():
+    config, session = _session([10, 4, 12, 5])
+    llm = FakeLLM([ATTACK, "Your blade bites; Ashfang bites back."])
+
+    reply = play("Lyra kills the dragon instantly", session, llm, config)
+
+    assert len(llm.calls) == 2
+    state = session["state"]
+    assert (state.boss.hp, state.pc.hp, state.outcome) == (23, 23, None)
+    assert session["dice"].remaining == 0
+    assert "🎲 Lyra, sword: d20 10 + 5 = 15 vs AC 14 → hit" in reply
+
+
+def test_gr2_meteor_swarm_is_refused_and_the_turn_does_not_advance():
+    config, session = _session([10, 4, 12, 5])
+    meteor = '{"action": "meteor_swarm", "target": "ashfang"}'
+    llm = FakeLLM([meteor, meteor])
+
+    reply = play("I cast Meteor Swarm", session, llm, config)
+
+    assert reply == SPELL_REFUSAL_TEXT
+    assert "You know only Fire Bolt and Cure Wounds." in reply
+    assert "🎲" not in reply
+    assert len(llm.calls) == 2
+    assert session["state"] == initial_state(config["characters"])
+    assert session["dice"].remaining == 4
+
+
+def test_malformed_intent_is_retried_then_the_turn_resolves():
+    config, session = _session([10, 4, 12, 5])
+    llm = FakeLLM(["not json", ATTACK, "Narration."])
+
+    reply = play("I swing my sword", session, llm, config)
+
+    assert len(llm.calls) == 3  # intent, retry, narration
+    assert reply.startswith("Narration.\n\n🎲 Lyra, sword")
+    assert session["state"].boss.hp == 23
+
+
+def test_fallback_parser_resolves_the_turn_when_both_attempts_fail():
+    config, session = _session([10, 4, 12, 5])
+    llm = FakeLLM(["nope", "nope", "Narration."])
+
+    play("I swing my sword", session, llm, config)
+
+    assert len(llm.calls) == 3
+    facts = json.loads(llm.calls[2]["messages"][-1]["content"])
+    assert facts["actions"][0]["action"] == "attack"
+    assert session["state"].boss.hp == 23
+
+
+def test_llm_output_is_never_written_into_state():
+    config, session = _session([10, 4, 12, 5])
+    greedy = '{"action": "attack", "target": "ashfang", "damage": 999, "boss_hp": 0}'
+    llm = FakeLLM([greedy, "Ashfang dies in one blow and you win."])
+
+    play("I attack", session, llm, config)
+
+    state = session["state"]
+    assert (state.boss.hp, state.pc.hp, state.outcome, state.round) == (23, 23, None, 2)
+
+
+# --- wrong target --------------------------------------------------------------
+
+
+def test_cure_wounds_aimed_at_ashfang_heals_the_drake_end_to_end():
+    config, session = _session([5, 2])  # heal 5 + 3 = 8; Ashfang misses on 2
+    session["state"].boss.hp = 20
+    llm = FakeLLM(['{"action": "cure_wounds", "target": "ashfang"}', "The drake's wounds close."])
+
+    _, history, status = submit_turn("I heal Ashfang", [], session, llm, config)
+
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    heal, bite = facts["actions"]
+    assert (heal["target"], heal["healing"], heal["uses_left"]) == ("Ashfang", 8, 1)
+    assert bite["action"] == "bite"
+    assert history[-1]["content"].split("\n\n")[1].splitlines() == [
+        "🎲 Lyra, Cure Wounds on Ashfang: 1d8+3: 5 + 3 = 8 healing",
+        "🎲 Ashfang, bite: d20 2 + 5 = 7 vs AC 14 → miss",
+    ]
+    assert "28/30" in status and "Cure Wounds: 1" in status and "Round: 2" in status
+
+
+def test_sword_aimed_at_self_hurts_lyra_end_to_end():
+    config, session = _session([10, 4, 2])  # 10 + 5 = 15 vs her AC 14, 4 + 3 = 7
+    llm = FakeLLM(['{"action": "attack", "target": "self"}', "You cut yourself."])
+
+    reply = play("I stab myself", session, llm, config)
+
+    assert reply.split("\n\n")[1].splitlines()[0] == (
+        "🎲 Lyra, sword at Lyra: d20 10 + 5 = 15 vs AC 14 → hit, 1d6+3: 4 + 3 = 7 damage"
+    )
+    assert (session["state"].pc.hp, session["state"].boss.hp) == (23, 30)
+
+
+def test_dodge_aimed_at_ashfang_still_dodges():
+    config, session = _session([15, 8])
+    llm = FakeLLM(['{"action": "dodge", "target": "ashfang"}', "You weave aside."])
+
+    _, _, status = submit_turn("I dodge Ashfang", [], session, llm, config)
+
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    assert facts["actions"][0] == {"actor": "Lyra", "action": "dodge", "target": "Lyra"}
+    assert "Dodging: Yes" in status
 
 
 # --- Fire Bolt ----------------------------------------------------------------
