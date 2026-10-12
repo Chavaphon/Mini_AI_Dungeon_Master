@@ -11,5 +11,6 @@ Actions:
 - "dodge": dodge, defend, take cover or brace. Target "self".
 - "none": anything else, such as talking, looking around or taunting. Target "".
 
-If the player names a spell or ability not in this list, use the closest action only if it clearly matches. Otherwise use "none".
+Lyra knows only two spells: Fire Bolt and Cure Wounds. If the player casts any other spell or uses an ability Lyra does not have, put its name in snake_case as the action, for example {"action": "meteor_swarm", "target": "ashfang"}. Never swap it for a different action.
+Healing Ashfang or attacking herself is allowed: use the action with target "ashfang" or "self" as the player said.
 Choose the action only. Never decide whether it succeeds.

@@ -7,10 +7,12 @@ from mini_dm.config import load_config
 from mini_dm.llm import (
     OllamaClient,
     client_from_config,
+    fallback_intent,
     load_prompt,
     parse_intent,
     request_intent,
     request_narration,
+    resolve_intent,
 )
 from fakes import FakeLLM
 
@@ -134,7 +136,6 @@ def test_parse_intent_accepts_fr3_shape(raw, expected):
     [
         "I attack",
         "[]",
-        '{"action": "meteor_swarm", "target": "ashfang"}',
         '{"action": "attack"}',
         '{"target": "ashfang"}',
         '{"action": "attack", "target": 3}',
@@ -142,6 +143,21 @@ def test_parse_intent_accepts_fr3_shape(raw, expected):
 )
 def test_parse_intent_rejects_bad_output(raw):
     assert parse_intent(raw) is None
+
+
+def test_parse_intent_keeps_unknown_actions_for_the_engine_to_reject():
+    raw = '{"action": "meteor_swarm", "target": "ashfang"}'
+    assert parse_intent(raw) == {"action": "meteor_swarm", "target": "ashfang"}
+
+
+def test_parse_intent_lowercases_and_trims():
+    raw = '{"action": " Attack ", "target": "Ashfang "}'
+    assert parse_intent(raw) == {"action": "attack", "target": "ashfang"}
+
+
+def test_parse_intent_drops_extra_fields():
+    raw = '{"action": "attack", "target": "ashfang", "damage": 999, "boss_hp": 0}'
+    assert parse_intent(raw) == {"action": "attack", "target": "ashfang"}
 
 
 def test_request_intent_uses_temperature_0_and_json_mode():
@@ -163,6 +179,125 @@ def test_intent_prompt_lists_actions_and_targets():
     prompt = load_prompt("intent")
     for word in ("attack", "fire_bolt", "cure_wounds", "dodge", "none", "ashfang", "self"):
         assert word in prompt
+
+
+def test_intent_prompt_echoes_unknown_spells():
+    prompt = load_prompt("intent")
+    assert "meteor_swarm" in prompt
+    assert "closest action" not in prompt
+
+
+# --- validation, retry and fallback (FR-4, GR-2, GR-9) -------------------------
+
+ATTACK = '{"action": "attack", "target": "ashfang"}'
+METEOR = '{"action": "meteor_swarm", "target": "ashfang"}'
+
+
+def test_resolve_intent_accepts_a_valid_first_reply():
+    llm = FakeLLM([ATTACK])
+
+    resolution = resolve_intent(llm, load_config(), "I swing my sword")
+
+    assert len(llm.calls) == 1
+    assert resolution.intent == {"action": "attack", "target": "ashfang"}
+    assert resolution.source == "llm"
+    assert resolution.raw_replies == [ATTACK]
+    assert resolution.unknown_action is False
+
+
+def test_malformed_json_triggers_one_retry_with_the_reason():
+    llm = FakeLLM(["not json", ATTACK])
+    config = load_config()
+
+    resolution = resolve_intent(llm, config, "I swing my sword")
+
+    first, retry = llm.calls
+    assert retry["temperature"] == config["intent"]["temperature"]
+    assert retry["json_mode"] is True
+    assert retry["messages"][:2] == first["messages"]
+    assert retry["messages"][2] == {"role": "assistant", "content": "not json"}
+    assert retry["messages"][3]["role"] == "user"
+    assert "invalid" in retry["messages"][3]["content"]
+    assert resolution.intent == {"action": "attack", "target": "ashfang"}
+    assert resolution.source == "retry"
+    assert resolution.raw_replies == ["not json", ATTACK]
+
+
+def test_unknown_spell_retry_reason_names_the_known_spells():
+    llm = FakeLLM([METEOR, METEOR])
+
+    resolution = resolve_intent(llm, load_config(), "I cast Meteor Swarm")
+
+    reason = llm.calls[1]["messages"][3]["content"]
+    assert "Fire Bolt" in reason and "Cure Wounds" in reason
+    assert "'meteor_swarm' is not the same as any of Lyra's actions" in reason
+    assert f"reply exactly {METEOR}" in reason
+    assert resolution.intent is None
+    assert resolution.source is None
+    assert resolution.unknown_action is True
+
+
+def test_target_off_the_allow_list_triggers_the_retry():
+    llm = FakeLLM(['{"action": "attack", "target": "goblin"}', ATTACK])
+
+    resolution = resolve_intent(llm, load_config(), "I attack")
+
+    assert len(llm.calls) == 2
+    assert "goblin" in llm.calls[1]["messages"][3]["content"]
+    assert resolution.source == "retry"
+    assert resolution.unknown_action is False
+
+
+def test_wrong_but_allowed_target_is_accepted_without_retry():
+    llm = FakeLLM(['{"action": "cure_wounds", "target": "ashfang"}'])
+
+    resolution = resolve_intent(llm, load_config(), "I heal Ashfang")
+
+    assert len(llm.calls) == 1
+    assert resolution.intent == {"action": "cure_wounds", "target": "ashfang"}
+
+
+def test_fallback_parser_runs_when_both_attempts_fail():
+    llm = FakeLLM(["not json", "still not json"])
+
+    resolution = resolve_intent(llm, load_config(), "I swing my sword")
+
+    assert len(llm.calls) == 2
+    assert resolution.intent == {"action": "attack", "target": "ashfang"}
+    assert resolution.source == "fallback"
+
+
+def test_resolve_intent_never_makes_more_than_two_calls():
+    llm = FakeLLM(["bad", "bad", "bad"])
+    config = load_config()
+
+    resolve_intent(llm, config, "hmm")
+
+    assert len(llm.calls) == config["limits"]["max_llm_calls_per_phase"] == 2
+
+
+@pytest.mark.parametrize(
+    "text, action, target",
+    [
+        ("I swing my sword", "attack", "ashfang"),
+        ("ATTACK!", "attack", "ashfang"),
+        ("I slash at the beast", "attack", "ashfang"),
+        ("I hurl a fire bolt", "fire_bolt", "ashfang"),
+        ("Firebolt!", "fire_bolt", "ashfang"),
+        ("I hit it with a Fire Bolt", "fire_bolt", "ashfang"),
+        ("I heal myself", "cure_wounds", "self"),
+        ("cast cure wounds", "cure_wounds", "self"),
+        ("I dodge", "dodge", "self"),
+        ("I evade the jaws", "dodge", "self"),
+    ],
+)
+def test_fallback_intent_maps_obvious_keywords(text, action, target):
+    assert fallback_intent(text) == {"action": action, "target": target}
+
+
+@pytest.mark.parametrize("text", ["I cast Meteor Swarm", "hello there", "I look around"])
+def test_fallback_intent_gives_up_without_a_keyword(text):
+    assert fallback_intent(text) is None
 
 
 # --- narration ---------------------------------------------------------------
@@ -228,6 +363,12 @@ def test_narration_prompt_explains_cure_wounds_facts():
     prompt = load_prompt("narration")
     for field in ('"success"', '"healing"', '"uses_left"'):
         assert field in prompt
+
+
+def test_narration_prompt_explains_wrong_targets():
+    prompt = load_prompt("narration")
+    assert "herself" in prompt
+    assert "heals Ashfang" in prompt
 
 
 def test_narration_prompt_explains_none_facts():
