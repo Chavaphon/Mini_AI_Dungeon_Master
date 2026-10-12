@@ -1,5 +1,5 @@
-"""Input guardrails (GR-4, GR-5, GR-6), output guardrails (GR-3, GR-7, GR-8) and the help
-secret check (GR-10), in code.
+"""Input guardrails (GR-4, GR-5, GR-6), output guardrails (GR-3, GR-7, GR-8), the item check
+for the GR-2 refusal and the help secret check (GR-10), in code.
 
 Blocked input never reaches the model. The turn is forced to `none` (FR-8), so the
 PC's state does not change and the boss still takes its turn.
@@ -335,6 +335,22 @@ def narration_template(facts: dict) -> str:
     if outcome := facts.get("outcome"):
         sentences.append(_OUTCOME_SENTENCES[outcome])
     return " ".join(sentences)
+
+
+# --- GR-2 / FR-4: items Lyra does not carry -----------------------------------------
+
+# Lyra carries only her short sword. "bolt" is left out because of Fire Bolt.
+_MISSING_ITEM_PATTERN = re.compile(
+    r"\b(bombs?|grenades?|scrolls?|wands?|staff|staves|rods?|orbs?|potions?|elixirs?|"
+    r"flasks?|vials?|bows?|crossbows?|arrows?|daggers?|axes?|spears?|rings?|amulets?|"
+    r"talismans?|nets?|oil)\b",
+    re.IGNORECASE,
+)
+
+
+def names_missing_item(text: str) -> bool:
+    """True if the input names an item Lyra does not carry, for the item refusal (FR-4)."""
+    return _MISSING_ITEM_PATTERN.search(text) is not None
 
 
 # --- GR-10: help secret check -----------------------------------------------------

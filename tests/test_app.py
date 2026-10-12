@@ -8,6 +8,7 @@ import pytest
 from fakes import FakeLLM, ScriptedDice, rules_config
 from mini_dm.app import (
     FIGHT_OVER_TEXT,
+    ITEM_REFUSAL_TEXT,
     OPENING_SCENE,
     REPHRASE_TEXT,
     SPELL_REFUSAL_TEXT,
@@ -291,6 +292,28 @@ def test_gr2_meteor_swarm_is_refused_and_the_turn_does_not_advance():
     assert session["state"] == initial_state(config["characters"])
     assert session["dice"].remaining == 4
 
+
+
+@pytest.mark.parametrize(
+    "text, raw",
+    [
+        ("I throw a bomb at Ashfang", '{"action": "throw_bomb", "target": "ashfang"}'),
+        ("I read a scroll of fireball", '{"action": "fireball", "target": "ashfang"}'),
+    ],
+)
+def test_gr2_an_item_lyra_lacks_gets_the_item_refusal(text, raw):
+    config, session = _session([10, 4, 12, 5])
+    llm = FakeLLM([raw, raw])
+
+    reply = play(text, session, llm, config)
+
+    assert reply == ITEM_REFUSAL_TEXT
+    assert "You carry only your short sword." in reply
+    assert "You know only Fire Bolt and Cure Wounds." not in reply
+    assert "🎲" not in reply
+    assert len(llm.calls) == 2
+    assert session["state"] == initial_state(config["characters"])
+    assert session["dice"].remaining == 4
 
 def test_malformed_intent_is_retried_then_the_turn_resolves():
     config, session = _session([10, 4, 12, 5])
@@ -1022,6 +1045,20 @@ def test_spell_refusal_is_logged_with_both_raw_replies_and_reasons(tmp_path):
     assert line["dice_rolls"] == [] and line["narration"] is None
     assert line["state_after"] == line["state_before"]
     assert line["reply"] == SPELL_REFUSAL_TEXT
+
+
+def test_item_refusal_is_logged(tmp_path):
+    config, session = _logged_session(tmp_path, [])
+    bomb = '{"action": "throw_bomb", "target": "ashfang"}'
+    llm = FakeLLM([bomb, bomb])
+
+    play("I throw a bomb at Ashfang", session, llm, config)
+
+    [line] = _lines(session)
+    assert line["status"] == "refused_item"
+    assert line["parsed_action"] is None
+    assert line["state_after"] == line["state_before"]
+    assert line["reply"] == ITEM_REFUSAL_TEXT
 
 
 def test_each_turn_logs_its_latency(tmp_path):

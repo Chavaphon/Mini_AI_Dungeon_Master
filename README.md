@@ -69,7 +69,7 @@ Lyra has four actions. Say them however you like:
 | Cure Wounds | "I heal myself" | Heals 1d8+3, up to max HP, 2 uses |
 | Dodge | "I dodge" | Attacks against Lyra have disadvantage until her next turn |
 
-Anything else ("I taunt the drake", "I look around") is narrated, and Ashfang still takes its turn. Spells Lyra does not know are refused ("You know only Fire Bolt and Cure Wounds."), and that turn does not count. Attempts to override the rules, off-topic requests and abusive or over-long input are refused or redirected in character.
+Anything else ("I taunt the drake", "I look around") is narrated, and Ashfang still takes its turn. Spells Lyra does not know are refused ("You know only Fire Bolt and Cure Wounds."), and so are items she does not carry, such as a bomb or a scroll ("You carry only your short sword."). Neither turn counts. Attempts to override the rules, off-topic requests and abusive or over-long input are refused or redirected in character.
 
 After each narration, the chat shows a code-built roll line per action: the d20, bonus, total against AC, hit or miss, and damage. Lyra acts first each round, then Ashfang. The fight ends when either side reaches 0 HP.
 

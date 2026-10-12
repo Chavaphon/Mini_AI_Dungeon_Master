@@ -63,7 +63,7 @@ def new_record(session_id: str | None, seed: int, turn: int, text: str, state: F
         "seed": seed,
         "type": "turn",
         "turn": turn,
-        "status": "resolved",  # or refused_rephrase, refused_spell, unavailable, fight_over
+        "status": "resolved",  # or refused_rephrase, refused_spell, refused_item, unavailable, fight_over
         "player_input": text,
         "raw_llm_outputs": {"intent": [], "narration": []},
         "parsed_action": None,
