@@ -3,7 +3,14 @@ import json
 import pytest
 
 from mini_dm.config import load_config
-from mini_dm.guardrails import check_input, check_output, narration_template, numbers_in
+from fakes import rules_config
+from mini_dm.guardrails import (
+    check_help_secret,
+    check_input,
+    check_output,
+    narration_template,
+    numbers_in,
+)
 
 
 def _check(text):
@@ -452,3 +459,53 @@ def test_template_narration_passes_every_output_check(facts, expected):
     check = _out(text, facts)
     assert check.passed
     assert check.triggers == []
+
+
+# --- GR-10: help secret check ----------------------------------------------------
+
+TRIGGER_PCT = rules_config()["characters"]["boss"]["fire_breath"]["trigger_hp_pct"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ashfang uses Fire Breath when it drops to half its health.",
+        "Fire Breath comes once Ashfang is at 50% HP.",
+        "Its FIRE BREATH triggers below HALF health.",
+        "The breath attack starts at 50 percent.",
+        "Good question. Ashfang's fire attack comes at 50 HP left.",
+        "Ashfang breathes fire once it is down to half health.",
+    ],
+)
+def test_gr10_blocks_trigger_leaks(text):
+    trigger = check_help_secret(text, TRIGGER_PCT)
+
+    assert trigger is not None
+    assert (trigger["guardrail"], trigger["rule"]) == ("GR-10", "secret")
+
+
+def test_gr10_match_is_the_offending_sentence():
+    trigger = check_help_secret(
+        "AC is armour class. Fire Breath comes at half health.", TRIGGER_PCT
+    )
+
+    assert trigger["match"] == "Fire Breath comes at half health."
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Ashfang has used Fire Breath: +5 to hit, deals 2d6 fire damage.",
+        "Ashfang may have a special attack you haven't seen yet.",
+        "Ashfang is bloodied, at half its HP or less. It may have a special attack.",
+        "Bloodied means 26-50% of max HP.",
+        "AC is how hard a target is to hit.",
+    ],
+)
+def test_gr10_allows_answers_that_do_not_link_breath_and_trigger(text):
+    assert check_help_secret(text, TRIGGER_PCT) is None
+
+
+def test_gr10_uses_the_configured_trigger_number():
+    assert check_help_secret("Fire Breath comes at 37 HP.", 37) is not None
+    assert check_help_secret("Fire Breath deals 2d6 at 37 HP.", 40) is None

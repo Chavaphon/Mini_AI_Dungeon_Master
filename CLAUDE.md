@@ -28,6 +28,8 @@ Mini AI Dungeon Master: a text chatbot that runs one boss fight (Lyra vs. Ashfan
 
 Turn loop (§10): input guardrails → intent call (temp 0, `format: "json"`) → validate, 1 retry → PC action → boss action → resolved facts → one narration call for both actions (temp 0.7) → output guardrails → UI + status panel + log. Normal turn = 2 LLM calls.
 
+Help loop (FR-14): input guardrails (GR-4, GR-6) → help call (rules sheet + fight state + last 3 pairs) → GR-10 secret check and output guardrails, 1 regeneration, then template → help sidebar. Help never writes state or rolls dice.
+
 ## Layout
 
 ```
@@ -38,11 +40,13 @@ mini_dm/
   llm.py           # Ollama client, intent and narration calls
   guardrails.py    # input, output and integrity checks
   turnlog.py       # JSONL turn log (FR-11)
+  help.py          # help chatbot: rules sheet, fight facts, help questions
   app.py           # Gradio chat UI and status panel
   simulate.py      # balance simulation, random PC policy, no LLM
   prompts/
     intent.txt
     narration.txt
+    help.txt
 tests/
 logs/              # JSONL turn logs (gitignored)
 config.json        # model name, temperatures, seed, limits

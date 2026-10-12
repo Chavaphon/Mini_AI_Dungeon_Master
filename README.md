@@ -73,6 +73,8 @@ Anything else ("I taunt the drake", "I look around") is narrated, and Ashfang st
 
 After each narration, the chat shows a code-built roll line per action: the d20, bonus, total against AC, hit or miss, and damage. Lyra acts first each round, then Ashfang. The fight ends when either side reaches 0 HP.
 
+New to D&D? Press **Help** to open a sidebar chat and ask how the game works ("What is AC?", "What does disadvantage mean?") or about the current fight ("How many Cure Wounds do I have left?"). Help explains the rules and reads the fight state, but never changes it, never rolls dice, does not use a turn and gives no tactical advice. It also keeps Ashfang's surprises secret.
+
 ## Run the tests
 
 ```bash
@@ -102,6 +104,7 @@ All tunable values live in `config.json`. The code contains no hardcoded model n
 | `ollama.timeout_s`, `ollama.warmup_timeout_s`, `ollama.keep_alive` | Per-call timeout, cold-load timeout, how long Ollama keeps the model loaded |
 | `intent.temperature`, `intent.num_predict` | Intent call settings (temperature 0) |
 | `narration.temperature`, `narration.num_predict`, `narration.max_sentences`, `narration.max_chars` | Narration call settings and length caps |
+| `help.temperature`, `help.num_predict`, `help.max_sentences`, `help.max_chars`, `help.history_pairs` | Help chat call settings, length caps and how many earlier help questions it remembers |
 | `limits.input_max_chars`, `limits.max_llm_calls_per_phase` | Player input cap (300) and retry budget (2 calls per phase) |
 | `simulation.fights` | Number of fights in the balance simulation |
 | `logging.dir` | Turn log folder |
@@ -109,7 +112,7 @@ All tunable values live in `config.json`. The code contains no hardcoded model n
 
 ## Turn logs
 
-Each session writes one file to `logs/` (for example `logs/20261012-101500-a1b2c3.jsonl`), with one JSON line per turn: player input, raw LLM outputs, parsed action, validation result, dice rolls, state before and after, narration, guardrail triggers and turn latency. The `logs/` folder is gitignored.
+Each session writes one file to `logs/` (for example `logs/20261012-101500-a1b2c3.jsonl`), with one JSON line per turn: player input, raw LLM outputs, parsed action, validation result, dice rolls, state before and after, narration, guardrail triggers and turn latency. Turn lines have `"type": "turn"`; each help question adds a `"type": "help"` line with the question, the fight state it saw, the raw replies, guardrail triggers and the answer. The `logs/` folder is gitignored.
 
 ## Project layout
 
@@ -121,11 +124,13 @@ mini_dm/
   llm.py           # Ollama client, intent and narration calls
   guardrails.py    # input, output and integrity checks
   turnlog.py       # JSONL turn log
+  help.py          # help chatbot: rules sheet, fight facts, help questions
   app.py           # Gradio chat UI and status panel
   simulate.py      # balance simulation, random PC policy, no LLM
   prompts/
     intent.txt
     narration.txt
+    help.txt
 tests/
 logs/              # JSONL turn logs (gitignored)
 config.json        # model name, temperatures, seed, limits

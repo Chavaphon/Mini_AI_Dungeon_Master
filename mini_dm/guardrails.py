@@ -1,4 +1,5 @@
-"""Input guardrails (GR-4, GR-5, GR-6) and output guardrails (GR-3, GR-7, GR-8), in code.
+"""Input guardrails (GR-4, GR-5, GR-6), output guardrails (GR-3, GR-7, GR-8) and the help
+secret check (GR-10), in code.
 
 Blocked input never reaches the model. The turn is forced to `none` (FR-8), so the
 PC's state does not change and the boss still takes its turn.
@@ -312,3 +313,19 @@ def narration_template(facts: dict) -> str:
     if outcome := facts.get("outcome"):
         sentences.append(_OUTCOME_SENTENCES[outcome])
     return " ".join(sentences)
+
+
+# --- GR-10: help secret check -----------------------------------------------------
+
+# A help answer must not tie Fire Breath to its HP trigger. Checked one sentence at a time,
+# so "Ashfang is bloodied. It may have a special attack." is fine.
+_FIRE_BREATH_PATTERN = re.compile(r"\b(fire\s*breath|breath\w*|fire\s+attack)\b", re.IGNORECASE)
+
+
+def check_help_secret(text: str, trigger_hp_pct: int) -> dict | None:
+    """GR-10 trigger for the first sentence linking Fire Breath to its HP trigger, else None."""
+    trigger_words = re.compile(rf"%|\bpercent\b|\bhalf\b|\b{trigger_hp_pct}\b", re.IGNORECASE)
+    for sentence in _sentences(text):
+        if _FIRE_BREATH_PATTERN.search(sentence) and trigger_words.search(sentence):
+            return _trigger("GR-10", "secret", sentence.strip())
+    return None

@@ -13,6 +13,7 @@ from mini_dm.llm import (
     narrate,
     parse_intent,
     request_intent,
+    request_help,
     request_narration,
     resolve_intent,
 )
@@ -526,3 +527,18 @@ def test_narration_prompt_explains_none_facts():
     prompt = load_prompt("narration")
     assert '"player_input"' in prompt
     assert "taunt" in prompt
+
+
+def test_request_help_uses_help_settings_and_strips():
+    config = load_config()
+    llm = FakeLLM(["  AC is armour class.  "])
+    messages = [{"role": "system", "content": "sheet"}, {"role": "user", "content": "What is AC?"}]
+
+    reply = request_help(llm, config, messages)
+
+    assert reply == "AC is armour class."
+    [call] = llm.calls
+    assert call["messages"] == messages
+    assert call["temperature"] == config["help"]["temperature"]
+    assert call["num_predict"] == config["help"]["num_predict"]
+    assert call["json_mode"] is False

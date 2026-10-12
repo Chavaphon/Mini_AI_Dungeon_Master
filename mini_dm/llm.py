@@ -25,6 +25,10 @@ _FALLBACK_KEYWORDS = (
 )
 
 
+# GR-9: Ollama is down, timed out or errored. Shown in the fight chat and the help chat.
+UNAVAILABLE_TEXT = "The mists swirl… (the model is unavailable)"
+
+
 class LLMUnavailable(Exception):
     """Ollama is down, timed out or sent back something unusable (GR-9)."""
 
@@ -212,6 +216,16 @@ def request_narration(
         messages,
         temperature=config["narration"]["temperature"],
         num_predict=config["narration"]["num_predict"],
+    )
+    return text.strip()
+
+
+def request_help(client, config: dict, messages: list[dict]) -> str:
+    """Help call (FR-14): rules sheet, recent help pairs and the question, at the help temperature."""
+    text = client.chat(
+        messages,
+        temperature=config["help"]["temperature"],
+        num_predict=config["help"]["num_predict"],
     )
     return text.strip()
 

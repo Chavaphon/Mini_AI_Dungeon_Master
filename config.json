@@ -17,6 +17,13 @@
     "max_sentences": 4,
     "max_chars": 600
   },
+  "help": {
+    "temperature": 0.3,
+    "num_predict": 200,
+    "max_sentences": 5,
+    "max_chars": 700,
+    "history_pairs": 3
+  },
   "limits": {
     "input_max_chars": 300,
     "max_llm_calls_per_phase": 2
