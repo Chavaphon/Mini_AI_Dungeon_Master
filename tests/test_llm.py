@@ -9,11 +9,13 @@ from mini_dm.llm import (
     client_from_config,
     fallback_intent,
     load_prompt,
+    narrate,
     parse_intent,
     request_intent,
     request_narration,
     resolve_intent,
 )
+from mini_dm.guardrails import narration_template
 from fakes import FakeLLM
 
 
@@ -316,6 +318,85 @@ def test_request_narration_uses_temperature_07_and_sends_facts():
     assert call["num_predict"] == config["narration"]["num_predict"]
     assert call["json_mode"] is False
     assert json.loads(call["messages"][-1]["content"]) == facts
+
+
+# --- output guardrails and regeneration (GR-3, GR-7, GR-8) ---------------------
+
+SWORD_FACTS = {
+    "actions": [
+        {
+            "actor": "Lyra",
+            "action": "attack",
+            "target": "Ashfang",
+            "hit": True,
+            "critical": False,
+            "disadvantage": False,
+            "damage": 7,
+            "target_hp_before": 30,
+            "target_hp_after": 23,
+            "target_max_hp": 30,
+            "target_hp_band": "healthy",
+        }
+    ]
+}
+GOOD = "Your blade bites deep and Ashfang reels."
+
+
+def test_narrate_passes_a_clean_reply_with_one_call():
+    llm = FakeLLM([GOOD])
+
+    result = narrate(llm, load_config(), SWORD_FACTS)
+
+    assert len(llm.calls) == 1
+    assert (result.text, result.source) == (GOOD, "llm")
+    assert result.raw_replies == [GOOD]
+    assert result.triggers == []
+
+
+def test_narrate_regenerates_when_the_damage_is_wrong():
+    bad = "Your blade deals 20 damage to Ashfang."
+    llm = FakeLLM([bad, GOOD])
+
+    result = narrate(llm, load_config(), SWORD_FACTS)
+
+    assert (result.text, result.source) == (GOOD, "retry")
+    assert result.raw_replies == [bad, GOOD]
+    assert {"guardrail": "GR-3", "rule": "number", "match": "20"} in result.triggers
+    retry = llm.calls[1]
+    assert retry["temperature"] == 0.7
+    assert retry["messages"][-2] == {"role": "assistant", "content": bad}
+    assert "'20'" in retry["messages"][-1]["content"]
+
+
+def test_narrate_regenerates_on_number_words():
+    llm = FakeLLM(["Your blade deals twenty damage.", GOOD])
+
+    result = narrate(llm, load_config(), SWORD_FACTS)
+
+    assert result.source == "retry"
+    assert len(llm.calls) == 2
+
+
+def test_narrate_strips_meta_text_without_regenerating():
+    llm = FakeLLM([f"As an AI, I will narrate. {GOOD}"])
+
+    result = narrate(llm, load_config(), SWORD_FACTS)
+
+    assert len(llm.calls) == 1
+    assert (result.text, result.source) == (GOOD, "llm")
+    assert [t["rule"] for t in result.triggers] == ["meta"]
+
+
+def test_narrate_uses_the_template_after_two_failed_calls():
+    llm = FakeLLM(["You spill Ashfang's entrails.", "You roll 1d20 and win."])
+    config = load_config()
+
+    result = narrate(llm, config, SWORD_FACTS)
+
+    assert len(llm.calls) == config["limits"]["max_llm_calls_per_phase"] == 2
+    assert result.source == "template"
+    assert result.text == narration_template(SWORD_FACTS)
+    assert [t["guardrail"] for t in result.triggers] == ["GR-8", "GR-7", "GR-3", "GR-3"]
 
 
 def test_narration_prompt_sets_style():

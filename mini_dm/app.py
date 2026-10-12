@@ -20,7 +20,7 @@ from mini_dm.engine import (
     play_turn,
 )
 from mini_dm.guardrails import check_input
-from mini_dm.llm import client_from_config, request_narration, resolve_intent
+from mini_dm.llm import client_from_config, narrate, resolve_intent
 
 OPENING_SCENE = (
     "Wind howls through the broken crown of the old watchtower. Charred beams and "
@@ -154,7 +154,8 @@ def new_session(config: dict) -> dict:
 
 
 def play(text: str, session: dict, client, config: dict) -> str:
-    """One turn: input guardrails -> intent call -> engine (PC then boss) -> one narration call."""
+    """One turn: input guardrails -> intent call -> engine (PC then boss) -> narration call
+    -> output guardrails."""
     state = session["state"]
     if state.outcome:
         return FIGHT_OVER_TEXT
@@ -177,7 +178,9 @@ def play(text: str, session: dict, client, config: dict) -> str:
         facts["actions"][0]["player_input"] = text  # so the narration can describe it (FR-8)
     if state.outcome:
         facts["outcome"] = state.outcome  # the closing narration (FR-10)
-    reply = f"{request_narration(client, config, facts)}\n\n{format_rolls(results)}"
+    narration = narrate(client, config, facts)  # output guardrails, then the template (GR-3/7/8)
+    session["guardrail_triggers"] = check.triggers + narration.triggers
+    reply = f"{narration.text}\n\n{format_rolls(results)}"
     return f"{check.response}\n\n{reply}" if check.blocked else reply
 
 

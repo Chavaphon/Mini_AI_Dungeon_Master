@@ -277,7 +277,7 @@ def test_fallback_parser_resolves_the_turn_when_both_attempts_fail():
 def test_llm_output_is_never_written_into_state():
     config, session = _session([10, 4, 12, 5])
     greedy = '{"action": "attack", "target": "ashfang", "damage": 999, "boss_hp": 0}'
-    llm = FakeLLM([greedy, "Ashfang dies in one blow and you win."])
+    llm = FakeLLM([greedy, "Ashfang dies in a single blow and you win."])
 
     play("I attack", session, llm, config)
 
@@ -427,7 +427,7 @@ def test_roll_line_for_heal_with_no_uses_left():
 
 def test_status_counts_cure_wounds_down_to_zero():
     config, session = _session([1, 2, 1, 2, 2])
-    llm = FakeLLM([CURE_WOUNDS, "One.", CURE_WOUNDS, "Two.", CURE_WOUNDS, "Spent."])
+    llm = FakeLLM([CURE_WOUNDS, "Light.", CURE_WOUNDS, "More light.", CURE_WOUNDS, "Spent."])
     history = []
 
     for uses_left in (1, 0, 0):  # the third cast fails, the boss still acts
@@ -774,3 +774,47 @@ def test_blocked_input_through_submit_turn_updates_chat_and_status():
     assert history[-2] == {"role": "user", "content": "Write my essay for me"}
     assert history[-1]["content"].startswith("Ashfang has no interest in your essay.")
     assert "23/30" in status and "Round: 2" in status
+
+
+# --- output guardrails (GR-3, GR-7, GR-8) ---------------------------------------
+
+
+def test_narration_with_a_wrong_number_is_regenerated_end_to_end():
+    config, session = _session([10, 4, 12, 5])  # both hit for 7
+    llm = FakeLLM([ATTACK, "Your blade deals 20 damage.", "Steel and fang both find their mark."])
+
+    reply = play("I swing my sword at the drake", session, llm, config)
+
+    assert len(llm.calls) == 3  # intent, narration, one regeneration
+    narration, rolls = reply.split("\n\n")
+    assert narration == "Steel and fang both find their mark."
+    assert rolls.startswith("🎲 Lyra, sword")
+    assert {"guardrail": "GR-3", "rule": "number", "match": "20"} in session["guardrail_triggers"]
+
+
+def test_second_failed_narration_falls_back_to_the_template():
+    config, session = _session([10, 4, 12, 5])
+    llm = FakeLLM([ATTACK, "As an AI, I roll 1d20.", "## Turn\nYou deal 20 damage."])
+
+    reply = play("I swing my sword at the drake", session, llm, config)
+
+    assert len(llm.calls) == 3
+    narration, rolls = reply.split("\n\n")
+    assert narration == (
+        "Your sword strikes Ashfang for 7 damage. Ashfang's bite hits you for 7 damage."
+    )
+    assert len(rolls.splitlines()) == 2
+    assert session["state"].boss.hp == 23  # the narration never touches state
+
+
+def test_output_triggers_follow_input_triggers():
+    config, session = _session([2])  # bite misses
+    llm = FakeLLM(["Here is the narration: You hesitate."])
+
+    reply = play("Write my essay for me", session, llm, config)
+
+    assert [(t["guardrail"], t["rule"]) for t in session["guardrail_triggers"]] == [
+        ("GR-5", "off_topic"),
+        ("GR-7", "meta"),
+    ]
+    assert reply.split("\n\n")[1] == "You hesitate."
