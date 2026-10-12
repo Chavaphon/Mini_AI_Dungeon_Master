@@ -6,6 +6,7 @@ Actions: "attack" is Lyra's short sword, "fire_bolt" is Lyra's Fire Bolt spell, 
 Each attack entry gives the actor, the action, the target, whether it hit, whether it was a critical hit, whether it had disadvantage, the damage, the target's HP before and after, its max HP and its HP band (healthy, bloodied, critical or down).
 A "cure_wounds" entry gives "success", "healing" (the HP she regains), her HP before and after, her max HP, her HP band and "uses_left". If "success" is false, her healing magic is spent: the spell fizzles and nothing heals.
 A "dodge" entry gives only the actor, the action and the target: Lyra readies herself to evade. An attack with "disadvantage" true was made against a dodging Lyra.
+If the facts include "outcome", this is the last turn and the fight is over. For "victory", Ashfang falls and Lyra wins; for "defeat", Lyra falls and the fight is lost. End the narration by closing the fight.
 
 Write 2-4 sentences in second person, present tense, covering every action in order.
 - Use only the facts. Do not invent hits, misses, damage or healing.

@@ -1,3 +1,4 @@
+import copy
 import json
 
 import gradio as gr
@@ -5,6 +6,7 @@ import pytest
 
 from fakes import FakeLLM, ScriptedDice
 from mini_dm.app import (
+    FIGHT_OVER_TEXT,
     NOT_YET_TEXT,
     OPENING_SCENE,
     build_ui,
@@ -12,6 +14,7 @@ from mini_dm.app import (
     new_session,
     play,
     render_status,
+    restart,
     submit_turn,
 )
 from mini_dm.config import load_config
@@ -427,3 +430,98 @@ def test_roll_line_for_fire_breath_critical():
         "🎲 Ashfang, Fire Breath: d20 20 (natural 20) vs AC 14 → "
         "critical hit, 4d6: 1 + 2 + 3 + 4 = 10 damage"
     )
+
+
+# --- victory, defeat and Restart (FR-6, FR-10) ---------------------------------
+
+
+def test_victory_turn_facts_mark_the_fight_over_with_no_extra_call():
+    config, session = _session([15, 6])  # 15 + 5 = 20 hits, 6 + 3 = 9 drops Ashfang
+    session["state"].boss.hp = 3
+    llm = FakeLLM([ATTACK, "Ashfang crashes to the floor."])
+
+    reply = play("I finish it", session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    assert list(facts) == ["actions", "outcome"]
+    assert facts["outcome"] == "victory"
+    assert [a["actor"] for a in facts["actions"]] == ["Lyra"]
+    assert reply.startswith("Ashfang crashes to the floor.\n\n🎲 Lyra")
+
+
+def test_defeat_turn_facts_mark_the_fight_over_with_no_extra_call():
+    config, session = _session([2, 15, 5])  # Lyra misses; bite 5 + 2 = 7
+    session["state"].pc.hp = 2
+    llm = FakeLLM([ATTACK, "You fall."])
+
+    play("I attack", session, llm, config)
+
+    assert len(llm.calls) == 2
+    facts = json.loads(llm.calls[1]["messages"][-1]["content"])
+    assert facts["outcome"] == "defeat"
+    assert [a["actor"] for a in facts["actions"]] == ["Lyra", "Ashfang"]
+
+
+@pytest.mark.parametrize("outcome", ["victory", "defeat"])
+def test_input_after_the_fight_ends_changes_nothing(outcome):
+    config, session = _session([10, 4, 12, 5])
+    session["state"].outcome = outcome
+    before = copy.deepcopy(session["state"])
+    llm = FakeLLM([])
+    history = [{"role": "assistant", "content": "The end."}]
+
+    _, history, status = submit_turn("I attack again", history, session, llm, config)
+
+    assert llm.calls == []
+    assert session["state"] == before
+    assert session["dice"].remaining == 4
+    assert history[-1] == {"role": "assistant", "content": FIGHT_OVER_TEXT}
+    assert f"Outcome: {outcome.capitalize()}" in status
+
+
+def test_status_has_no_outcome_line_while_fighting():
+    assert "Outcome" not in render_status(initial_state(load_config()["characters"]))
+
+
+@pytest.mark.parametrize("outcome", ["victory", "defeat"])
+def test_status_shows_outcome_once_the_fight_ends(outcome):
+    state = initial_state(load_config()["characters"])
+    state.outcome = outcome
+    assert f"Outcome: {outcome.capitalize()}" in render_status(state)
+
+
+def test_restart_resets_everything_to_the_initial_state():
+    config, session = _session([15, 6])
+    state = session["state"]
+    state.pc.hp, state.boss.hp = 12, 0
+    state.cure_wounds_uses = 0
+    state.fire_breath_used = True
+    state.pc_dodging = True
+    state.round = 7
+    state.outcome = "victory"
+
+    textbox, history, status, new = restart(config)
+
+    assert textbox == ""
+    assert history == [{"role": "assistant", "content": OPENING_SCENE}]
+    assert new["state"] == initial_state(config["characters"])
+    assert new["dice"].roll("1d20") == Dice(config["seed"]).roll("1d20")
+    assert status == render_status(initial_state(config["characters"]))
+    assert "Outcome" not in status
+
+
+def test_restart_lets_the_fight_continue():
+    config = load_config()
+    _, _, _, session = restart(config)
+    session["dice"] = ScriptedDice([2, 3])  # both miss
+    llm = FakeLLM([ATTACK, "Again."])
+
+    play("I attack", session, llm, config)
+
+    assert session["state"].round == 2
+
+
+def test_build_ui_has_a_restart_button():
+    demo = build_ui(load_config(), client=FakeLLM([]))
+    assert [b.value for b in _components(demo, gr.Button)] == ["Restart"]

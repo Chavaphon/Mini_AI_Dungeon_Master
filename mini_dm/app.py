@@ -34,6 +34,12 @@ NOT_YET_TEXT = (
     "answers. Strike at Ashfang, hurl a Fire Bolt, cast Cure Wounds or dodge!"
 )
 
+# Fixed reply once the fight has ended: no model call, no state change.
+FIGHT_OVER_TEXT = (
+    "The smoke settles over the ruined watchtower and the lair falls silent. "
+    "This fight is over. Press Restart to face Ashfang again."
+)
+
 _ACTION_LABELS = {
     "attack": "sword",
     "fire_bolt": "Fire Bolt",
@@ -62,14 +68,17 @@ def _hp_bar(combatant: Combatant) -> str:
 
 
 def render_status(state: FightState) -> str:
-    """Status panel HTML: HP bars, Cure Wounds uses, round and dodge state (FR-9)."""
-    return (
+    """Status panel HTML: HP bars, Cure Wounds uses, round, dodge state (FR-9) and outcome."""
+    status = (
         _hp_bar(state.pc)
         + _hp_bar(state.boss)
         + f"<div>Cure Wounds: {state.cure_wounds_uses}</div>"
         + f"<div>Round: {state.round}</div>"
         + f"<div>Dodging: {'Yes' if state.pc_dodging else 'No'}</div>"
     )
+    if state.outcome:
+        status += f"<div><strong>Outcome: {state.outcome.capitalize()}</strong></div>"
+    return status
 
 
 def _dice_text(roll: Roll, unit: str) -> str:
@@ -129,12 +138,18 @@ def new_session(config: dict) -> dict:
 
 def play(text: str, session: dict, client, config: dict) -> str:
     """One turn: intent call -> engine (PC then boss) -> one narration call."""
+    state = session["state"]
+    if state.outcome:
+        return FIGHT_OVER_TEXT
+
     _raw, intent = request_intent(client, config, text)
     if intent is None or intent["action"] not in PC_ACTIONS:
         return NOT_YET_TEXT
 
-    results = play_turn(session["state"], session["dice"], config["characters"], intent["action"])
+    results = play_turn(state, session["dice"], config["characters"], intent["action"])
     facts = {"actions": [result.narration_facts() for result in results]}
+    if state.outcome:
+        facts["outcome"] = state.outcome  # the closing narration (FR-10)
     return f"{request_narration(client, config, facts)}\n\n{format_rolls(results)}"
 
 
@@ -148,6 +163,13 @@ def submit_turn(text: str, history: list, session: dict, client, config: dict):
         {"role": "assistant", "content": reply},
     ]
     return "", history, render_status(session["state"])
+
+
+def restart(config: dict):
+    """Restart handler: returns (cleared textbox, chat history, status HTML, fresh session)."""
+    session = new_session(config)
+    history = [{"role": "assistant", "content": OPENING_SCENE}]
+    return "", history, render_status(session["state"]), session
 
 
 def build_ui(config: dict, client=None) -> gr.Blocks:
@@ -169,6 +191,7 @@ def build_ui(config: dict, client=None) -> gr.Blocks:
                     show_label=False,
                     interactive=True,
                 )
+                restart_button = gr.Button("Restart")
             with gr.Column(scale=1):
                 status = gr.HTML(render_status(initial["state"]), label="Status")
 
@@ -178,6 +201,10 @@ def build_ui(config: dict, client=None) -> gr.Blocks:
         textbox.submit(
             on_submit,
             inputs=[textbox, chatbot, session],
+            outputs=[textbox, chatbot, status, session],
+        )
+        restart_button.click(
+            lambda: restart(config),
             outputs=[textbox, chatbot, status, session],
         )
     return demo
