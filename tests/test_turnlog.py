@@ -4,7 +4,16 @@ from pathlib import Path
 from fakes import ScriptedDice
 from mini_dm.config import CONFIG_PATH, load_config
 from mini_dm.engine import initial_state, play_turn
-from mini_dm.turnlog import append, dice_rolls, log_dir, new_log_path, state_dict
+from mini_dm.help import HelpAnswer
+from mini_dm.turnlog import (
+    append,
+    dice_rolls,
+    help_record,
+    log_dir,
+    new_log_path,
+    new_record,
+    state_dict,
+)
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -103,3 +112,39 @@ def test_append_writes_one_json_line_per_record(tmp_path):
 def test_logs_dir_is_gitignored():
     ignored = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "logs/" in ignored
+
+
+# --- record shapes ------------------------------------------------------------
+
+
+def test_turn_records_are_typed_turn():
+    state = initial_state(load_config()["characters"])
+    assert new_record("s1", 42, 1, "I attack", state)["type"] == "turn"
+
+
+def test_help_record_has_the_help_fields():
+    answer = HelpAnswer(
+        text="AC is armour class.",
+        facts={"round": 1},
+        status="answered",
+        raw_replies=["As an AI, I can help. AC is armour class."],
+        triggers=[{"guardrail": "GR-7", "rule": "meta", "match": "As an AI"}],
+    )
+
+    record = help_record("s1", 42, "What is AC?", answer, 1.234)
+
+    assert record.pop("timestamp")
+    assert record == {
+        "session_id": "s1",
+        "seed": 42,
+        "type": "help",
+        "status": "answered",
+        "question": "What is AC?",
+        "facts": {"round": 1},
+        "raw_replies": ["As an AI, I can help. AC is armour class."],
+        "guardrail_triggers": [{"guardrail": "GR-7", "rule": "meta", "match": "As an AI"}],
+        "answer": "AC is armour class.",
+        "used_template": False,
+        "error": None,
+        "latency_s": 1.23,
+    }

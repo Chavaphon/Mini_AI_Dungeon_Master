@@ -1,5 +1,7 @@
 """JSONL turn log (FR-11): one JSON line per player submission, one file per session.
 
+Help questions (FR-14) go in the same file as `"type": "help"` lines; turns are `"type": "turn"`.
+
 Only records what the engine and the LLM calls already produced. Nothing here changes state.
 """
 
@@ -11,6 +13,7 @@ from pathlib import Path
 
 from mini_dm.config import CONFIG_PATH
 from mini_dm.engine import ActionResult, FightState, HealResult, Roll, TurnResult
+from mini_dm.help import HelpAnswer
 
 
 def log_dir(config: dict) -> Path:
@@ -58,6 +61,7 @@ def new_record(session_id: str | None, seed: int, turn: int, text: str, state: F
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "session_id": session_id,
         "seed": seed,
+        "type": "turn",
         "turn": turn,
         "status": "resolved",  # or refused_rephrase, refused_spell, unavailable, fight_over
         "player_input": text,
@@ -75,6 +79,27 @@ def new_record(session_id: str | None, seed: int, turn: int, text: str, state: F
         "guardrail_triggers": [],
         "error": None,
         "latency_s": None,  # wall time of the whole turn, LLM calls included (NFR latency)
+    }
+
+
+def help_record(
+    session_id: str | None, seed: int, question: str, answer: HelpAnswer, latency_s: float
+) -> dict:
+    """One help question (FR-14). It is not a turn: no turn number and no state change."""
+    return {
+        "timestamp": datetime.now().isoformat(timespec="seconds"),
+        "session_id": session_id,
+        "seed": seed,
+        "type": "help",
+        "status": answer.status,  # answered, template, refused or unavailable
+        "question": question,
+        "facts": answer.facts,
+        "raw_replies": answer.raw_replies,
+        "guardrail_triggers": answer.triggers,
+        "answer": answer.text,
+        "used_template": answer.used_template,
+        "error": answer.error,
+        "latency_s": round(latency_s, 2),
     }
 
 

@@ -1,6 +1,6 @@
 # Help Chatbot — Design
 
-*2026-10-12 · status: approved in brainstorming, awaiting written-spec review*
+*2026-10-12 · status: implemented in #30*
 
 ## 1. Goal
 

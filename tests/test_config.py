@@ -47,3 +47,13 @@ def test_model_name_only_in_config():
         assert model not in source, path.name
         # "Ollama" is the server name and is fine; a bare "llama" is a model name.
         assert not re.search(r"(?<!o)llama", source, re.IGNORECASE), path.name
+
+
+def test_config_has_help_values():
+    assert load_config()["help"] == {
+        "temperature": 0.3,
+        "num_predict": 200,
+        "max_sentences": 5,
+        "max_chars": 700,
+        "history_pairs": 3,
+    }

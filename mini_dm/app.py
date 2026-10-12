@@ -25,7 +25,14 @@ from mini_dm.engine import (
     snapshot,
 )
 from mini_dm.guardrails import check_input
-from mini_dm.llm import LLMUnavailable, client_from_config, narrate, resolve_intent
+from mini_dm.help import answer_help
+from mini_dm.llm import (
+    UNAVAILABLE_TEXT,
+    LLMUnavailable,
+    client_from_config,
+    narrate,
+    resolve_intent,
+)
 
 OPENING_SCENE = (
     "Wind howls through the broken crown of the old watchtower. Charred beams and "
@@ -47,18 +54,15 @@ SPELL_REFUSAL_TEXT = (
     "cast Cure Wounds, dodge, or say something to the drake."
 )
 
-# GR-9: Ollama is down, timed out or errored. The turn does not advance.
-UNAVAILABLE_TEXT = "The mists swirl… (the model is unavailable)"
-
 # Fixed reply once the fight has ended: no model call, no state change.
 FIGHT_OVER_TEXT = (
     "The smoke settles over the ruined watchtower and the lair falls silent. "
     "This fight is over. Press Restart to face Ashfang again."
 )
 
-# Gradio's Chatbot Clear button has no off switch. It only wipes the chat, not the fight,
-# so it is hidden; Restart is the way to reset.
-UI_CSS = '#fight button[aria-label="Clear"] { display: none; }'
+# Gradio's Chatbot Clear button has no off switch. It only wipes the chat, not the fight
+# (or the help history the model sees), so it is hidden; Restart is the way to reset.
+UI_CSS = '#fight button[aria-label="Clear"], #help button[aria-label="Clear"] { display: none; }'
 
 _ACTION_LABELS = {
     "attack": "sword",
@@ -273,13 +277,59 @@ def restart(config: dict, log_dir: Path | None = None):
     return "", history, render_status(session["state"]), session
 
 
+def submit_help(text: str, chat: list, history: list, session: dict, client, config: dict):
+    """Help submit handler: returns (cleared textbox, help chat, help history).
+
+    Reads the fight state only; the fight, its dice, its chat and its turn count are
+    untouched (FR-14). Logged as a help line when the session logs.
+    """
+    if not text.strip():
+        return text, chat, history
+    start = time.perf_counter()
+    answer = answer_help(client, config, session["state"], text, history)
+    if log_path := session["log_path"]:
+        latency_s = time.perf_counter() - start
+        turnlog.append(
+            log_path, turnlog.help_record(log_path.stem, config["seed"], text, answer, latency_s)
+        )
+    pair = [{"role": "user", "content": text}, {"role": "assistant", "content": answer.text}]
+    if answer.remember:
+        history = history + pair
+    return "", chat + pair, history
+
+
+def restart_help():
+    """Restart also clears the help chat and history: old answers describe the old fight."""
+    return [], []
+
+
+def open_help():
+    return gr.Sidebar(open=True)
+
+
 def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Blocks:
     client = client or client_from_config(config)
     initial = new_session(config, log_dir)
 
     with gr.Blocks(title="Mini AI Dungeon Master") as demo:
         session = gr.State(initial)
-        gr.Markdown("# Mini AI Dungeon Master: Lyra vs. Ashfang")
+        help_history = gr.State([])
+        with gr.Row():
+            gr.Markdown("# Mini AI Dungeon Master: Lyra vs. Ashfang")
+            help_button = gr.Button("Help", scale=0, min_width=80)
+        with gr.Sidebar(label="Help", position="right", open=False) as help_sidebar:
+            help_chat = gr.Chatbot(
+                value=[],
+                label="Help",
+                elem_id="help",
+                placeholder="Ask me anything about how this fight works.",
+                height=420,
+            )
+            help_textbox = gr.Textbox(
+                placeholder="Ask a rules question",
+                show_label=False,
+                interactive=True,
+            )
         with gr.Row():
             with gr.Column(scale=3):
                 chatbot = gr.Chatbot(
@@ -300,6 +350,9 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
         def on_submit(text, history, session_value):
             return (*submit_turn(text, history, session_value, client, config), session_value)
 
+        def on_help_submit(text, chat, history, session_value):
+            return submit_help(text, chat, history, session_value, client, config)
+
         textbox.submit(
             on_submit,
             inputs=[textbox, chatbot, session],
@@ -307,10 +360,19 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
             show_progress="minimal",
             show_progress_on=chatbot,  # one indicator, not one per output
         )
+        help_textbox.submit(
+            on_help_submit,
+            inputs=[help_textbox, help_chat, help_history, session],
+            outputs=[help_textbox, help_chat, help_history],
+            show_progress="minimal",
+            show_progress_on=help_chat,
+        )
+        help_button.click(open_help, outputs=help_sidebar)
         restart_button.click(
             lambda: restart(config, log_dir),
             outputs=[textbox, chatbot, status, session],
         )
+        restart_button.click(restart_help, outputs=[help_chat, help_history])
     return demo
 
 
