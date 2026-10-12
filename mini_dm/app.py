@@ -1,6 +1,7 @@
 """Gradio chat UI and status panel. Run from the repo root: python -m mini_dm.app"""
 
 import html
+import time
 from pathlib import Path
 
 import gradio as gr
@@ -180,7 +181,9 @@ def play(text: str, session: dict, client, config: dict) -> str:
     record = turnlog.new_record(
         log_path.stem if log_path else None, config["seed"], session["turns"], text, state
     )
+    start = time.perf_counter()
     record["reply"] = _play(text, session, client, config, record)
+    record["latency_s"] = round(time.perf_counter() - start, 2)
     record["state_after"] = turnlog.state_dict(state)
     session["last_turn"] = record
     if log_path:

@@ -9,7 +9,7 @@ Actions:
 - "fire_bolt": cast Fire Bolt at Ashfang. Target "ashfang".
 - "cure_wounds": cast Cure Wounds to heal. Target "self".
 - "dodge": dodge, defend, take cover or brace. Target "self".
-- "none": anything else, such as talking, looking around or taunting. Target "".
+- "none": anything else, such as talking, looking around or taunting. Target "". Lyra carries only her short sword, so using or drinking any other item (a potion, scroll, bow, bomb) is also "none".
 
 Lyra knows only two spells: Fire Bolt and Cure Wounds. If the player casts any other spell or uses an ability Lyra does not have, put its name in snake_case as the action, for example {"action": "meteor_swarm", "target": "ashfang"}. Never swap it for a different action.
 Healing Ashfang or attacking herself is allowed: use the action with target "ashfang" or "self" as the player said.

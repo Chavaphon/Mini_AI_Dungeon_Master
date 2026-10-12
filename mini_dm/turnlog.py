@@ -74,6 +74,7 @@ def new_record(session_id: str | None, seed: int, turn: int, text: str, state: F
         "reply": None,
         "guardrail_triggers": [],
         "error": None,
+        "latency_s": None,  # wall time of the whole turn, LLM calls included (NFR latency)
     }
 
 

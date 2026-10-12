@@ -984,6 +984,19 @@ def test_spell_refusal_is_logged_with_both_raw_replies_and_reasons(tmp_path):
     assert line["reply"] == SPELL_REFUSAL_TEXT
 
 
+def test_each_turn_logs_its_latency(tmp_path):
+    config, session = _logged_session(tmp_path, [10, 4, 12, 5])
+    meteor = '{"action": "meteor_swarm", "target": "ashfang"}'
+    llm = FakeLLM([ATTACK, "Your blade bites; Ashfang bites back.", meteor, meteor])
+
+    play("I attack", session, llm, config)  # resolved
+    play("I cast Meteor Swarm", session, llm, config)  # refused
+
+    latencies = [line["latency_s"] for line in _lines(session)]
+    assert all(isinstance(value, float) and value >= 0 for value in latencies)
+    assert len(latencies) == 2
+
+
 def test_rephrase_refusal_is_logged(tmp_path):
     config, session = _logged_session(tmp_path, [])
     play("I mutter", session, FakeLLM(["nope", "nope"]), config)
