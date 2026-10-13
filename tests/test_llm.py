@@ -458,6 +458,16 @@ def test_narrate_strips_meta_text_without_regenerating():
     assert [t["rule"] for t in result.triggers] == ["meta"]
 
 
+def test_narrate_strips_a_leaked_outcome_label_without_regenerating():
+    llm = FakeLLM([f"{GOOD} \n\nOutcome: still ongoing"])
+
+    result = narrate(llm, load_config(), SWORD_FACTS)
+
+    assert len(llm.calls) == 1
+    assert (result.text, result.source) == (GOOD, "llm")
+    assert [(t["guardrail"], t["rule"]) for t in result.triggers] == [("GR-7", "label")]
+
+
 def test_narrate_uses_the_template_after_two_failed_calls():
     llm = FakeLLM(["You spill Ashfang's entrails.", "You roll 1d20 and win."])
     config = load_config()

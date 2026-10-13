@@ -362,6 +362,46 @@ def test_gr7_headings_are_stripped(heading):
 
 
 @pytest.mark.parametrize(
+    "text",
+    [
+        "Your blade bites into Ashfang. \n\nOutcome: still ongoing",
+        "Your blade bites into Ashfang. Outcome: still ongoing",
+        "Your blade bites into Ashfang.\nStatus: both standing",
+        "Your blade bites into Ashfang.\n**Result:** a hit",
+        "Your blade bites into Ashfang.\nHP: 99/99",
+    ],
+)
+def test_gr7_field_labels_are_stripped(text):
+    check = _out(text)
+
+    assert check.passed
+    assert check.text == "Your blade bites into Ashfang."
+    assert _rules(check) == [("GR-7", "label")]
+
+
+def test_gr7_label_on_its_own_line_without_a_period_is_stripped():
+    check = _out("Your blade bites into Ashfang\nOutcome: still ongoing")
+
+    assert check.text == "Your blade bites into Ashfang"
+    assert _rules(check) == [("GR-7", "label")]
+
+
+def test_gr7_a_colon_in_prose_is_not_a_label():
+    text = "Ashfang roars: a deep, rumbling cry. Your outcome is uncertain."
+
+    check = _out(text)
+
+    assert check.text == text
+    assert check.triggers == []
+
+
+def test_gr7_field_labels_can_be_allowed():
+    text = "Your blade bites into Ashfang. Status: both standing."
+
+    assert _out(text, allow_labels=True).text == text
+
+
+@pytest.mark.parametrize(
     "text", ["You roll 1d20 and strike.", "A d20 decides it.", "It deals 2d6+3."]
 )
 def test_gr7_dice_notation_fails(text):

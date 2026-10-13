@@ -147,6 +147,7 @@ def answer_help(
             max_sentences=help_config["max_sentences"],
             max_chars=help_config["max_chars"],
             allow_dice=True,
+            allow_labels=True,
         )
         answer.triggers += check.triggers
         reasons = list(check.reasons)

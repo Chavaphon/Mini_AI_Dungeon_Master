@@ -298,6 +298,14 @@ def test_gr7_dice_notation_is_allowed_in_help():
     assert len(llm.calls) == 1
 
 
+def test_gr7_field_labels_are_allowed_in_help():
+    reply = "Status: Ashfang is still standing. Keep attacking."
+    answer, llm, _ = _ask("How is the fight going?", [reply])
+
+    assert answer.text == reply
+    assert answer.triggers == []
+
+
 def test_gr7_answer_over_the_sentence_cap_is_regenerated():
     too_long = "AC is armour class. " * (rules_config()["help"]["max_sentences"] + 1)
 
