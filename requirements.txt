@@ -2,3 +2,4 @@ gradio
 httpx
 pydantic
 pytest
+playwright

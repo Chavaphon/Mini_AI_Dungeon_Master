@@ -68,7 +68,30 @@ FIGHT_OVER_TEXT = (
 
 # Gradio's Chatbot Clear button has no off switch. It only wipes the chat, not the fight
 # (or the help history the model sees), so it is hidden; Restart is the way to reset.
-UI_CSS = '#fight button[aria-label="Clear"], #help button[aria-label="Clear"] { display: none; }'
+# Gradio also centres a chatbot placeholder; the help prompt sits top left, where answers start.
+UI_CSS = (
+    '#fight button[aria-label="Clear"], #help button[aria-label="Clear"] { display: none; }\n'
+    "#help .placeholder { justify-content: flex-start; align-items: flex-start;"
+    " padding: 36px 16px 0; }\n"  # clear of the floating "Help" label
+    "#help .placeholder p { text-align: left; }"
+)
+
+
+def _focus_js(elem_id: str, *, if_idle: bool = False) -> str:
+    """Browser JS that puts the cursor in a textbox. With `if_idle`, only when nothing
+    else has it, so a reply does not pull the cursor out of the other chat.
+    setTimeout lets Gradio re-enable the textbox before the focus."""
+    focus = f"document.querySelector('#{elem_id} textarea')?.focus()"
+    if if_idle:
+        focus = f"if (document.activeElement === document.body) {focus}"
+    return f"() => {{ setTimeout(() => {{ {focus}; }}, 0); }}"
+
+
+# The sidebar's own chevron opens and closes it too, so only the browser knows whether it
+# is open; the Help button clicks the chevron rather than asking the server.
+TOGGLE_HELP_JS = "() => document.querySelector('#help-sidebar .toggle-button')?.click()"
+FOCUS_HELP_JS = _focus_js("help-input")
+FOCUS_FIGHT_JS = _focus_js("fight-input")
 
 _ACTION_LABELS = {
     "attack": "sword",
@@ -267,16 +290,27 @@ def _play(text: str, session: dict, client, config: dict, record: dict) -> str:
     return f"{check.response}\n\n{reply}" if check.blocked else reply
 
 
-def submit_turn(text: str, history: list, session: dict, client, config: dict):
-    """Gradio submit handler: returns (cleared textbox, chat history, status HTML)."""
+def show_message(text: str, chat: list):
+    """First half of a submit: returns (textbox, chat, pending text).
+
+    Shows the message in the chat at once and locks the textbox until the reply, so a
+    second message cannot overtake the first. Blank input changes nothing.
+    """
     if not text.strip():
-        return text, history, render_status(session["state"])
-    reply = play(text, session, client, config)
-    history = history + [
-        {"role": "user", "content": text},
-        {"role": "assistant", "content": reply},
-    ]
-    return "", history, render_status(session["state"])
+        return text, chat, ""
+    textbox = gr.Textbox(value="", interactive=False)
+    return textbox, chat + [{"role": "user", "content": text}], text
+
+
+def reply_turn(text: str, history: list, session: dict, client, config: dict):
+    """Second half of a fight submit: returns (unlocked textbox, chat history, status HTML).
+
+    `history` already shows `text` (show_message); this plays the turn and adds the reply.
+    """
+    if text:
+        reply = play(text, session, client, config)
+        history = history + [{"role": "assistant", "content": reply}]
+    return gr.Textbox(interactive=True), history, render_status(session["state"])
 
 
 def restart(config: dict, log_dir: Path | None = None):
@@ -289,14 +323,15 @@ def restart(config: dict, log_dir: Path | None = None):
     return "", history, render_status(session["state"]), session
 
 
-def submit_help(text: str, chat: list, history: list, session: dict, client, config: dict):
-    """Help submit handler: returns (cleared textbox, help chat, help history).
+def reply_help(text: str, chat: list, history: list, session: dict, client, config: dict):
+    """Second half of a help submit: returns (unlocked textbox, help chat, help history).
 
-    Reads the fight state only; the fight, its dice, its chat and its turn count are
-    untouched (FR-14). Logged as a help line when the session logs.
+    `chat` already shows `text` (show_message). Reads the fight state only; the fight,
+    its dice, its chat and its turn count are untouched (FR-14). Logged as a help line
+    when the session logs.
     """
-    if not text.strip():
-        return text, chat, history
+    if not text:
+        return gr.Textbox(interactive=True), chat, history
     start = time.perf_counter()
     answer = answer_help(client, config, session["state"], text, history)
     if log_path := session["log_path"]:
@@ -304,19 +339,15 @@ def submit_help(text: str, chat: list, history: list, session: dict, client, con
         turnlog.append(
             log_path, turnlog.help_record(log_path.stem, config["seed"], text, answer, latency_s)
         )
-    pair = [{"role": "user", "content": text}, {"role": "assistant", "content": answer.text}]
+    reply = {"role": "assistant", "content": answer.text}
     if answer.remember:
-        history = history + pair
-    return "", chat + pair, history
+        history = history + [{"role": "user", "content": text}, reply]
+    return gr.Textbox(interactive=True), chat + [reply], history
 
 
 def restart_help():
     """Restart also clears the help chat and history: old answers describe the old fight."""
     return [], []
-
-
-def open_help():
-    return gr.Sidebar(open=True)
 
 
 def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Blocks:
@@ -326,10 +357,14 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
     with gr.Blocks(title="Mini AI Dungeon Master") as demo:
         session = gr.State(initial)
         help_history = gr.State([])
+        pending_turn = gr.State("")  # the message show_message put in the chat, to answer
+        pending_help = gr.State("")
         with gr.Row():
             gr.Markdown("# Mini AI Dungeon Master: Lyra vs. Ashfang")
             help_button = gr.Button("Help", scale=0, min_width=80)
-        with gr.Sidebar(label="Help", position="right", open=False) as help_sidebar:
+        with gr.Sidebar(
+            label="Help", position="right", open=False, elem_id="help-sidebar"
+        ) as help_sidebar:
             help_chat = gr.Chatbot(
                 value=[],
                 label="Help",
@@ -341,6 +376,7 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
                 placeholder="Ask a rules question",
                 show_label=False,
                 interactive=True,
+                elem_id="help-input",
             )
         with gr.Row():
             with gr.Column(scale=3):
@@ -354,32 +390,49 @@ def build_ui(config: dict, client=None, log_dir: Path | None = None) -> gr.Block
                     placeholder="What do you do?",
                     show_label=False,
                     interactive=True,
+                    elem_id="fight-input",
+                    autofocus=True,
                 )
                 restart_button = gr.Button("Restart")
             with gr.Column(scale=1):
                 status = gr.HTML(render_status(initial["state"]), label="Status")
 
-        def on_submit(text, history, session_value):
-            return (*submit_turn(text, history, session_value, client, config), session_value)
+        def on_reply(text, history, session_value):
+            return (*reply_turn(text, history, session_value, client, config), session_value)
 
-        def on_help_submit(text, chat, history, session_value):
-            return submit_help(text, chat, history, session_value, client, config)
+        def on_help_reply(text, chat, history, session_value):
+            return reply_help(text, chat, history, session_value, client, config)
 
+        # Each submit runs in two steps, so the message shows before the model answers.
         textbox.submit(
-            on_submit,
-            inputs=[textbox, chatbot, session],
+            show_message,
+            inputs=[textbox, chatbot],
+            outputs=[textbox, chatbot, pending_turn],
+            queue=False,
+            show_progress="hidden",
+        ).then(
+            on_reply,
+            inputs=[pending_turn, chatbot, session],
             outputs=[textbox, chatbot, status, session],
             show_progress="minimal",
             show_progress_on=chatbot,  # one indicator, not one per output
-        )
+        ).then(None, js=_focus_js("fight-input", if_idle=True))
         help_textbox.submit(
-            on_help_submit,
-            inputs=[help_textbox, help_chat, help_history, session],
+            show_message,
+            inputs=[help_textbox, help_chat],
+            outputs=[help_textbox, help_chat, pending_help],
+            queue=False,
+            show_progress="hidden",
+        ).then(
+            on_help_reply,
+            inputs=[pending_help, help_chat, help_history, session],
             outputs=[help_textbox, help_chat, help_history],
             show_progress="minimal",
             show_progress_on=help_chat,
-        )
-        help_button.click(open_help, outputs=help_sidebar)
+        ).then(None, js=_focus_js("help-input", if_idle=True))
+        help_button.click(None, js=TOGGLE_HELP_JS)
+        help_sidebar.expand(None, js=FOCUS_HELP_JS)
+        help_sidebar.collapse(None, js=FOCUS_FIGHT_JS)
         restart_button.click(
             lambda: restart(config, log_dir),
             outputs=[textbox, chatbot, status, session],

@@ -32,7 +32,7 @@ player input
 
 - Windows with Python 3.14 (the `py` launcher)
 - [Ollama](https://ollama.com) running locally, with the `llama3.1:8b` model
-- Python packages in `requirements.txt`: `gradio`, `httpx`, `pydantic`, `pytest`
+- Python packages in `requirements.txt`: `gradio`, `httpx`, `pydantic`, `pytest`, `playwright`
 
 ## Setup
 
@@ -41,6 +41,7 @@ From the repo root:
 ```bash
 py -3.14 -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
+.venv/Scripts/python -m playwright install chromium
 ollama pull llama3.1:8b
 ```
 
@@ -81,7 +82,7 @@ New to D&D? Press **Help** to open a sidebar chat and ask how the game works ("W
 .venv/Scripts/python -m pytest
 ```
 
-The tests use a fake LLM client and never call the real model, so Ollama does not need to be running.
+The tests use a fake LLM client and never call the real model, so Ollama does not need to be running. `tests/test_browser.py` drives the real UI in headless Chromium through Playwright, and skips itself if Playwright's Chromium is not installed.
 
 ## Balance simulation
 
