@@ -160,6 +160,11 @@ _NUMBER_PATTERN = re.compile(
 
 # GR-7: markdown headings and whole-line bold titles are stripped.
 _HEADING_LINE = re.compile(r"^\s*(#{1,6}\s.*|\*\*[^*\n]+\*\*:?)\s*$", re.MULTILINE)
+# GR-7: field labels such as "Outcome: still ongoing" are stripped, on their own line or as
+# a sentence (narration only; help answers may list "HP: 30").
+_LABEL = r"[\s*_]*(outcome|status|result|hp|health|round|turn)[*_]*\s*:"
+_LABEL_LINE = re.compile(rf"^{_LABEL}.*$", re.MULTILINE | re.IGNORECASE)
+_LABEL_SENTENCE = re.compile(rf"^{_LABEL}", re.IGNORECASE)
 # GR-7: a preamble before the narration is stripped up to its colon...
 _META_PREFIX = re.compile(
     r"\b(here('s|\s+is)|below\s+is)\s+(the|your|my)\s+narration[^:.!?]*:\s*", re.IGNORECASE
@@ -234,11 +239,17 @@ class OutputCheck:
 
 
 def check_output(
-    text: str, facts_text: str, *, max_sentences: int, max_chars: int, allow_dice: bool = False
+    text: str,
+    facts_text: str,
+    *,
+    max_sentences: int,
+    max_chars: int,
+    allow_dice: bool = False,
+    allow_labels: bool = False,
 ) -> OutputCheck:
     """Run the GR-3, GR-7 and GR-8 checks on a model reply.
 
-    Headings and meta sentences are stripped. Any other match fails the reply. `facts_text`
+    Headings, field labels and meta sentences are stripped. Any other match fails the reply. `facts_text`
     is everything the model was given; a number passes only if it appears there.
     """
     triggers, reasons = [], []
@@ -250,6 +261,10 @@ def check_output(
     for match in _HEADING_LINE.finditer(text):
         triggers.append(_trigger("GR-7", "heading", match.group().strip()))
     text = _HEADING_LINE.sub("", text)
+    if not allow_labels:
+        for match in _LABEL_LINE.finditer(text):
+            triggers.append(_trigger("GR-7", "label", match.group().strip()))
+        text = _LABEL_LINE.sub("", text)
     for match in _META_PREFIX.finditer(text):
         triggers.append(_trigger("GR-7", "meta", match.group().strip()))
     text = _META_PREFIX.sub("", text)
@@ -257,6 +272,8 @@ def check_output(
     for sentence in _sentences(text):
         if match := _META_SENTENCE.search(sentence):
             triggers.append(_trigger("GR-7", "meta", match.group()))
+        elif not allow_labels and _LABEL_SENTENCE.match(sentence):
+            triggers.append(_trigger("GR-7", "label", sentence.strip()))
         else:
             kept.append(sentence)
     text = re.sub(r"\s+", " ", " ".join(kept)).strip()
